@@ -1,5 +1,5 @@
 // ============================================================
-// البوت المتكامل - النسخة النهائية مع سجلات التذاكر (HTML) ومكافآت الفويس والرسائل
+// البوت المتكامل - النسخة النهائية مع سجلات التذاكر (HTML)
 // ============================================================
 
 const {
@@ -70,7 +70,6 @@ const ConfigSchema = new mongoose.Schema({
   sellerRole: String,
   botControllerRole: String,
   pointsPerTask: { type: Number, default: 10 },
-  dailySalary: { type: Number, default: 5 },
   promotionPoints: { type: Number, default: 100 },
   leavePanelImage: String,
   storePanelImage: String,
@@ -83,10 +82,7 @@ const UserSchema = new mongoose.Schema({
   xp: { type: Number, default: 0 },
   level: { type: Number, default: 0 },
   messages: { type: Number, default: 0 },
-  pt: { type: Number, default: 0 },
   adminPoints: { type: Number, default: 0 },
-  lastDaily: Date,
-  lastVoiceReward: { type: Date, default: null },
   assignedTasks: [{ taskId: mongoose.Schema.Types.ObjectId, status: { type: String, enum: ['pending', 'accepted', 'completed'], default: 'pending' } }],
   leave: { isOnLeave: { type: Boolean, default: false }, leaveEnd: Date, savedRoles: [String] },
   purchasedRoles: [String],
@@ -593,36 +589,14 @@ const client = new Client({
   ],
 });
 
-const voiceSessions = new Map();
-
 client.once('ready', async () => {
   console.log(`✅ البوت جاهز باسم ${client.user.tag}`);
   console.log(`👑 صاحب البوت: ${OWNER_ID}`);
   client.user.setActivity('The Kingdom Never Falls.', { type: ActivityType.Watching });
 
-  setInterval(async () => {
-    const now = Date.now();
-    for (const [key, session] of voiceSessions) {
-      const [guildId, userId] = key.split('-');
-      const guild = client.guilds.cache.get(guildId);
-      if (!guild) continue;
-      const member = await guild.members.fetch(userId).catch(() => null);
-      if (!member) continue;
-      if (!member.voice.channel) continue;
-      const elapsed = now - session.joinTime;
-      const newMinutes = Math.floor(elapsed / 60000);
-      if (newMinutes > session.minutes) {
-        session.minutes = newMinutes;
-      }
-    }
-  }, 10000);
-
   if (CLIENT_ID && CLIENT_ID !== 'YOUR_CLIENT_ID') {
     const commands = [
       new SlashCommandBuilder().setName('مساعدة').setDescription('عرض قائمة الأوامر'),
-      new SlashCommandBuilder().setName('رصيدي').setDescription('عرض رصيدك من PT والنقاط الإدارية'),
-      new SlashCommandBuilder().setName('توب').setDescription('عرض أغنى 10 أشخاص في السيرفر'),
-      new SlashCommandBuilder().setName('مصرف').setDescription('الحصول على الراتب اليومي'),
       new SlashCommandBuilder().setName('مستوى').setDescription('عرض مستوى عضو').addUserOption(opt => opt.setName('عضو').setDescription('اختر عضواً (اختياري)').setRequired(false)),
       new SlashCommandBuilder().setName('ترتيب').setDescription('عرض ترتيب المستويات'),
       new SlashCommandBuilder().setName('معلومات').setDescription('عرض معلومات عن عضو').addUserOption(opt => opt.setName('عضو').setDescription('اختر عضواً (اختياري)').setRequired(false)),
@@ -823,7 +797,7 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
 });
 
 // ============================================================
-// ========== نظام المستويات والأوتو لاين ومكافأة الرسائل ==========
+// ========== نظام المستويات والأوتو لاين ==========
 // ============================================================
 
 client.on('messageCreate', async (message) => {
@@ -834,34 +808,22 @@ client.on('messageCreate', async (message) => {
   const userId = message.author.id;
   const config = await getGuildConfig(guildId);
 
-  if (!config.levelChannelId || message.channel.id === config.levelChannelId) {
-    const user = await getUser(guildId, userId);
-    user.messages += 1;
-    const gain = Math.floor(Math.random() * 15) + 5;
-    user.xp += gain;
-    let currentLevel = user.level;
-    let requiredXP = (currentLevel + 1) * 100;
+  // 🔹 نظام المستويات - يحسب في أي روم
+  const user = await getUser(guildId, userId);
+  user.messages += 1;
+  const gain = Math.floor(Math.random() * 15) + 5;
+  user.xp += gain;
+  let currentLevel = user.level;
+  let requiredXP = (currentLevel + 1) * 100;
 
-    if (user.messages % 30 === 0 && user.messages > 0) {
-      user.pt += 15;
-      await user.save();
-      try {
-        const dmEmbed = new EmbedBuilder()
-          .setColor(0x2b2d31)
-          .setTitle('📝 مكافأة الرسائل')
-          .setDescription(`وصلت إلى **${user.messages}** رسالة!\nحصلت على **15 PT** 🎉`)
-          .setFooter({ text: 'استمر في الكتابة!' })
-          .setTimestamp();
-        await message.author.send({ embeds: [dmEmbed] });
-      } catch (e) {}
-    }
+  if (user.xp >= requiredXP) {
+    user.level += 1;
+    user.xp = 0;
+    await user.save();
 
-    if (user.xp >= requiredXP) {
-      user.level += 1;
-      user.xp = 0;
-      await user.save();
-
-      const levelChannelId = config.levelChannelId || message.channel.id;
+    // 🔹 إرسال إعلان المستوى الجديد في الروم المحدد فقط
+    const levelChannelId = config.levelChannelId;
+    if (levelChannelId) {
       const levelChannel = message.guild.channels.cache.get(levelChannelId);
       if (levelChannel) {
         const embed = new EmbedBuilder()
@@ -873,20 +835,21 @@ client.on('messageCreate', async (message) => {
         if (generalImage) embed.setThumbnail(generalImage);
         await levelChannel.send({ embeds: [embed] });
       }
-
-      const levelRole = await LevelRole.findOne({ guildId, level: user.level });
-      if (levelRole) {
-        const role = message.guild.roles.cache.get(levelRole.roleId);
-        if (role) {
-          const member = await message.guild.members.fetch(userId).catch(() => null);
-          if (member) await member.roles.add(role).catch(() => {});
-        }
-      }
-    } else {
-      await user.save();
     }
+
+    const levelRole = await LevelRole.findOne({ guildId, level: user.level });
+    if (levelRole) {
+      const role = message.guild.roles.cache.get(levelRole.roleId);
+      if (role) {
+        const member = await message.guild.members.fetch(userId).catch(() => null);
+        if (member) await member.roles.add(role).catch(() => {});
+      }
+    }
+  } else {
+    await user.save();
   }
 
+  // ====== الأوتو لاين ======
   const auto = await AutoLine.findOne({ guildId, channelId: message.channel.id });
   if (auto && auto.enabled && (auto.text || auto.image)) {
     const channel = client.channels.cache.get(message.channel.id);
@@ -906,6 +869,7 @@ client.on('messageCreate', async (message) => {
     }
   }
 
+  // ====== الردود التلقائية ======
   const autoReply = await findAutoReply(guildId, message.content);
   if (autoReply) {
     try {
@@ -917,46 +881,6 @@ client.on('messageCreate', async (message) => {
       }
     } catch (e) {
       await message.channel.send(autoReply.reply).catch(() => {});
-    }
-  }
-});
-
-// ============================================================
-// ========== نظام الصوت ==========
-// ============================================================
-
-client.on('voiceStateUpdate', async (oldState, newState) => {
-  const userId = newState.member.id;
-  const guildId = newState.guild.id;
-  const key = `${guildId}-${userId}`;
-
-  if (newState.channelId && !oldState.channelId) {
-    voiceSessions.set(key, { joinTime: Date.now(), minutes: 0 });
-  }
-
-  if (!newState.channelId && oldState.channelId) {
-    const session = voiceSessions.get(key);
-    if (session) {
-      const elapsed = Date.now() - session.joinTime;
-      const minutes = Math.floor(elapsed / 60000);
-      if (minutes > 0) {
-        const user = await getUser(guildId, userId);
-        user.pt += minutes;
-        await user.save();
-        try {
-          const member = await newState.guild.members.fetch(userId);
-          const dmEmbed = new EmbedBuilder()
-            .setColor(0x2b2d31)
-            .setTitle('🎧 مكافأة الفويس')
-            .setDescription(`قضيت **${minutes}** دقيقة في الفويس.\nحصلت على **${minutes} PT** 🎉`)
-            .setFooter({ text: 'استمر في التفاعل لكسب المزيد!' })
-            .setTimestamp();
-          await member.send({ embeds: [dmEmbed] });
-        } catch (e) {
-          console.log('❌ تعذر إرسال رسالة خاصة للمستخدم:', userId);
-        }
-      }
-      voiceSessions.delete(key);
     }
   }
 });
@@ -984,12 +908,11 @@ client.on('interactionCreate', async (interaction) => {
         .setColor(0x2b2d31)
         .addFields(
           { name: '👑 نظام التحكم', value: '`متحكم @شخص` `الغاء_متحكم @شخص` `قائمة_المتحكمين`', inline: false },
-          { name: '📋 المهام', value: '`!لوحة_المهام` (للمدراء العلويين) – مع نقاط PT + نقاط إدارية وإثبات', inline: false },
+          { name: '📋 المهام', value: '`!لوحة_المهام` (للمدراء العلويين) – مع نقاط إدارية وإثبات', inline: false },
           { name: '📅 الإجازات', value: '`!بانل_اجازات` (لوحة تحكم موحدة للمسؤول)\n`!طلب_اجازة` (للإداريين)\n**أوامر سلاش:** `/بانل_اجازات` `/الاجازات_الحالية` `/سجل_الاجازات`', inline: false },
-          { name: '💰 العملة', value: '`!رصيدي` (يعرض PT + نقاط إدارية)\n`!مصرف` (راتب يومي)\n`!اعطاء_عملات` و `!سحب_عملات` (للمتحكمين)\n`!توب` (ترتيب العملة)\n**مكافآت تلقائية:** 15 PT كل 30 رسالة، 1 PT كل دقيقة في الفويس (تُرسل عند الخروج)', inline: false },
           { name: '🛒 المتجر', value: '`!بانل_اضافة_منتج` (للمتحكمين) – لإضافة منتج\n`!متجر` – شراء رتبة عبر القائمة المنسدلة\nيتطلب رتبة بائع (تُعيّن بـ `!تعيين رتبة_بائع`)', inline: false },
           { name: '🔐 تسجيل الدخول', value: '`!تسجيل_الدخول` (للمودات)', inline: false },
-          { name: '📊 المستويات', value: '`!مستوى` `!ترتيب`', inline: false },
+          { name: '📊 المستويات', value: '`!مستوى` `!ترتيب`\n**ملاحظة:** يحسب المستوى في أي روم، ويُعلن في الروم المحدد', inline: false },
           { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = (ايموجي)-(اسم المستخدم)', inline: false },
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
@@ -999,54 +922,6 @@ client.on('interactionCreate', async (interaction) => {
       const generalImage = getGeneralImage(interaction.guild, config);
       if (generalImage) embed.setImage(generalImage);
       await interaction.reply({ embeds: [embed], ephemeral: true });
-      return;
-    }
-
-    // ----- رصيدي -----
-    if (commandName === 'رصيدي') {
-      const user = await getUser(guildId, interaction.user.id);
-      const embed = new EmbedBuilder()
-        .setTitle(`💰 رصيد ${interaction.user.username}`)
-        .setDescription(`**PT:** ${user.pt}\n**نقاط إدارية:** ${user.adminPoints}`)
-        .setColor(0x2b2d31);
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-      return;
-    }
-
-    // ----- توب -----
-    if (commandName === 'توب') {
-      const top = await User.find({ guildId }).sort({ pt: -1 }).limit(10);
-      if (!top.length) {
-        return interaction.reply({ content: '📭 لا يوجد أي شخص لديه PT حتى الآن.', ephemeral: true });
-      }
-      let desc = '';
-      let rank = 1;
-      for (const entry of top) {
-        const member = interaction.guild.members.cache.get(entry.userId);
-        const name = member ? member.user.username : `مستخدم ${entry.userId}`;
-        desc += `**#${rank}** ${name} - \`${entry.pt} PT\`\n`;
-        rank++;
-      }
-      const embed = new EmbedBuilder().setTitle('🏆 ترتيب أغنى 10 أشخاص').setDescription(desc).setColor(0x2b2d31).setTimestamp();
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-      return;
-    }
-
-    // ----- مصرف -----
-    if (commandName === 'مصرف') {
-      const user = await getUser(guildId, interaction.user.id);
-      const now = Date.now();
-      const last = user.lastDaily ? user.lastDaily.getTime() : 0;
-      if (now - last < 24 * 60 * 60 * 1000) {
-        const remaining = 24 * 60 * 60 * 1000 - (now - last);
-        const hours = Math.floor(remaining / (60 * 60 * 1000));
-        return interaction.reply({ content: `⏳ يمكنك الحصول على الراتب بعد ${hours} ساعة.`, ephemeral: true });
-      }
-      const salary = config.dailySalary || 5;
-      user.pt += salary;
-      user.lastDaily = new Date();
-      await user.save();
-      await interaction.reply({ content: `✅ تم إضافة **${salary} PT** كراتب يومي. رصيدك الآن: **${user.pt} PT**`, ephemeral: true });
       return;
     }
 
@@ -1576,9 +1451,8 @@ client.on('interactionCreate', async (interaction) => {
             { name: '🚪 دور الدخول', value: '`دور_دخول @دور`' },
             { name: '💡 الاقتراحات', value: '`قناة_اقتراح #قناة`، `عنوان_اقتراح نص`، `وصف_اقتراح نص`، `لون_اقتراح #هيكس`، `صورة_اقتراح رابط`' },
             { name: '👑 الإدارة', value: '`رتبة_اداري_علوي @رتبة`، `رتبة_اداري_صغري @رتبة`، `رتبة_مسؤول_اجازات @رتبة`، `رتبة_تحكم_البوت @رتبة`' },
-            { name: '💰 المالية', value: '`نقاط_المهمة [عدد]`، `راتب_يومي [عدد]`، `نقاط_الترقية [عدد]`' },
-            { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة السعر [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '📌 القنوات', value: '`قناة_المهام #قناة`، `قناة_الاجازات #قناة`، `قناة_المودات #قناة`' },
+            { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة السعر [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '🖼️ بانل الإجازات', value: '`صورة_بانل_اجازات [رابط]`' },
             { name: '👤 رتبة البائع', value: '`رتبة_بائع @رتبة`' }
           )
@@ -1884,7 +1758,6 @@ client.on('interactionCreate', async (interaction) => {
       const emoji = section.emoji || '📌';
       const role = section.roleId ? interaction.guild.roles.cache.get(section.roleId) : null;
       const user = await interaction.guild.members.fetch(oldLog.userId).catch(() => null);
-      // 🔹 استخدام displayName للحصول على الاسم المعروض
       const username = user ? user.displayName.replace(/\s/g, '_') : 'user';
       const channel = await interaction.guild.channels.create({
         name: `${emoji}-${username}`,
@@ -1964,7 +1837,7 @@ client.on('interactionCreate', async (interaction) => {
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('product_price')
-              .setLabel('السعر (PT)')
+              .setLabel('السعر')
               .setStyle(TextInputStyle.Short)
               .setRequired(true)
               .setPlaceholder('مثال: 50')
@@ -2007,32 +1880,28 @@ client.on('interactionCreate', async (interaction) => {
         if (!role) {
           return interaction.reply({ content: '❌ الرتبة غير موجودة.', ephemeral: true });
         }
-        const user = await getUser(guildId, purchase.userId);
-        if (user.pt < purchase.price) {
-          return interaction.reply({ content: `⚠️ رصيد المستخدم غير كافٍ. لديه ${user.pt} PT فقط.`, ephemeral: true });
-        }
-        user.pt -= purchase.price;
-        await user.save();
+        // التحقق من الرصيد (تم إزالته، لكن نظرياً لا يوجد رصيد الآن)
+        // سنمرر الشراء مباشرة
         await member.roles.add(role);
         purchase.status = 'completed';
         await purchase.save();
         const embed = new EmbedBuilder()
           .setTitle('✅ تم تأكيد الشراء')
           .setColor(0x2b2d31)
-          .setDescription(`تم منح **${role.name}** لـ ${member}.\nالسعر: **${purchase.price} PT**\nالموافق: ${interaction.user}`)
+          .setDescription(`تم منح **${role.name}** لـ ${member}.\nالموافق: ${interaction.user}`)
           .setTimestamp();
         await interaction.reply({ embeds: [embed], ephemeral: false });
         try {
           const dmEmbed = new EmbedBuilder()
             .setTitle('🎉 تم شراء الرتبة بنجاح!')
-            .setDescription(`تم منحك رتبة **${role.name}** في **${interaction.guild.name}**.\nتم خصم **${purchase.price} PT** من رصيدك.`)
+            .setDescription(`تم منحك رتبة **${role.name}** في **${interaction.guild.name}**.`)
             .setColor(0x2b2d31);
           await member.send({ embeds: [dmEmbed] });
         } catch (e) {}
         await logToChannel(guildId, {
           title: '🛒 شراء رتبة',
           color: 0x2b2d31,
-          description: `**المشتري:** ${member.user.tag}\n**الرتبة:** ${role.name}\n**السعر:** ${purchase.price} PT\n**الموافق:** ${interaction.user.tag}`
+          description: `**المشتري:** ${member.user.tag}\n**الرتبة:** ${role.name}\n**الموافق:** ${interaction.user.tag}`
         });
       } else if (action === 'reject') {
         purchase.status = 'cancelled';
@@ -2276,7 +2145,6 @@ client.on('interactionCreate', async (interaction) => {
       const title = interaction.fields.getTextInputValue('task_title');
       const desc = interaction.fields.getTextInputValue('task_desc');
       const toId = interaction.fields.getTextInputValue('task_to');
-      const ptPoints = parseInt(interaction.fields.getTextInputValue('task_pt_points')) || 0;
       const adminPoints = parseInt(interaction.fields.getTextInputValue('task_admin_points')) || 0;
       const target = await interaction.guild.members.fetch(toId).catch(() => null);
       if (!target) return interaction.reply({ content: '❌ المستلم غير موجود.', ephemeral: true });
@@ -2286,15 +2154,14 @@ client.on('interactionCreate', async (interaction) => {
         assignedTo: toId,
         title,
         description: desc,
-        points: ptPoints,
         adminPoints: adminPoints,
       });
       await task.save();
       const user = await getUser(guildId, toId);
       user.assignedTasks.push({ taskId: task._id, status: 'pending' });
       await user.save();
-      await interaction.reply({ content: `✅ تم إنشاء المهمة وإرسالها إلى ${target}.\nنقاط PT: ${ptPoints} | نقاط إدارية: ${adminPoints}`, ephemeral: true });
-      try { await target.send(`📩 تم تكليفك بمهمة جديدة: **${title}**\nنقاط PT: ${ptPoints} | نقاط إدارية: ${adminPoints}\nاستخدم \`!لوحة_المهام\` لقبولها.`); } catch (e) {}
+      await interaction.reply({ content: `✅ تم إنشاء المهمة وإرسالها إلى ${target}.\nنقاط إدارية: ${adminPoints}`, ephemeral: true });
+      try { await target.send(`📩 تم تكليفك بمهمة جديدة: **${title}**\nنقاط إدارية: ${adminPoints}\nاستخدم \`!لوحة_المهام\` لقبولها.`); } catch (e) {}
       return;
     }
 
@@ -2313,7 +2180,6 @@ client.on('interactionCreate', async (interaction) => {
       task.proofImage = proofImage;
       await task.save();
       const user = await getUser(guildId, interaction.user.id);
-      user.pt += task.points;
       user.adminPoints += task.adminPoints;
       await user.save();
       const userTasks = user.assignedTasks;
@@ -2334,7 +2200,7 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
       await interaction.reply({
-        content: `✅ تم إنهاء المهمة **${task.title}**\nحصلت على **${task.points} PT** و **${task.adminPoints} نقاط إدارية**.\nالإثبات: ${proofText}${proofImage ? `\n[صورة](${proofImage})` : ''}`,
+        content: `✅ تم إنهاء المهمة **${task.title}**\nحصلت على **${task.adminPoints} نقاط إدارية**.\nالإثبات: ${proofText}${proofImage ? `\n[صورة](${proofImage})` : ''}`,
         ephemeral: true
       });
       return;
@@ -2356,11 +2222,11 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '❌ الرتبة غير موجودة.', ephemeral: true });
       }
       await addStoreItem(guildId, roleId, price, desc);
-      await interaction.reply({ content: `✅ تم إضافة المنتج **${role.name}** بسعر **${price} PT** بنجاح.`, ephemeral: true });
+      await interaction.reply({ content: `✅ تم إضافة المنتج **${role.name}** بسعر **${price}** بنجاح.`, ephemeral: true });
       await logToChannel(guildId, {
         title: '🛒 إضافة منتج',
         color: 0x2b2d31,
-        description: `**المنفذ:** ${interaction.user}\n**الرتبة:** ${role.name} (${roleId})\n**السعر:** ${price} PT\n**الوصف:** ${desc}`
+        description: `**المنفذ:** ${interaction.user}\n**الرتبة:** ${role.name} (${roleId})\n**السعر:** ${price}\n**الوصف:** ${desc}`
       });
       return;
     }
@@ -2430,7 +2296,6 @@ client.on('interactionCreate', async (interaction) => {
       const ticketNumber = settings.ticketCounter;
       const emoji = section.emoji || '📌';
       const role = section.roleId ? interaction.guild.roles.cache.get(section.roleId) : null;
-      // 🔹 استخدام displayName بدلاً من username
       const username = interaction.user.displayName.replace(/\s/g, '_');
       const channel = await interaction.guild.channels.create({
         name: `${emoji}-${username}`,
@@ -2530,7 +2395,7 @@ client.on('interactionCreate', async (interaction) => {
       const embed = new EmbedBuilder()
         .setTitle('🛒 طلب شراء جديد')
         .setColor(0x2b2d31)
-        .setDescription(`**المشتري:** ${interaction.user} (${interaction.user.id})\n**الرتبة:** ${role.name}\n**السعر:** ${item.price} PT\n**الوصف:** ${item.description || 'لا يوجد'}`)
+        .setDescription(`**المشتري:** ${interaction.user} (${interaction.user.id})\n**الرتبة:** ${role.name}\n**السعر:** ${item.price}\n**الوصف:** ${item.description || 'لا يوجد'}`)
         .setTimestamp();
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -2550,7 +2415,7 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ============================================================
-// ========== الأوامر النصية (الكاملة) ==========
+// ========== الأوامر النصية ==========
 // ============================================================
 
 function isAdminCommand(cmd) {
@@ -2586,116 +2451,39 @@ client.on('messageCreate', async (message) => {
   try {
 
     // ============================================================
-    // == أوامر العملة (PT) ==
+    // == المستويات ==
     // ============================================================
 
-    if (cmd === 'رصيدي') {
-      const user = await getUser(guildId, message.author.id);
+    if (cmd === 'مستوى') {
+      const member = message.mentions.members.first() || message.member;
+      const user = await getUser(guildId, member.id);
       const embed = new EmbedBuilder()
-        .setTitle(`💰 رصيد ${message.author.username}`)
-        .setDescription(`**PT:** ${user.pt}\n**نقاط إدارية:** ${user.adminPoints}`)
-        .setColor(0x2b2d31);
+        .setTitle(`📊 مستوى ${member.user.username}`)
+        .setColor(0x2b2d31)
+        .addFields(
+          { name: 'المستوى', value: `${user.level}`, inline: true },
+          { name: 'XP', value: `${user.xp}/${(user.level + 1) * 100}`, inline: true },
+          { name: 'الرسائل', value: `${user.messages}`, inline: true }
+        );
+      if (generalImage) embed.setImage(generalImage);
       await message.channel.send({ embeds: [embed] });
       return;
     }
 
-    if (cmd === 'توب') {
-      const top = await User.find({ guildId }).sort({ pt: -1 }).limit(10);
-      if (!top.length) {
-        await message.reply('📭 لا يوجد أي شخص لديه PT حتى الآن.');
-        return;
-      }
+    if (cmd === 'ترتيب') {
+      const top = await User.find({ guildId }).sort({ level: -1, xp: -1 }).limit(10);
+      if (!top.length) return message.reply('📭 لا توجد بيانات مستويات.');
       let desc = '';
       let rank = 1;
       for (const entry of top) {
         const member = message.guild.members.cache.get(entry.userId);
         const name = member ? member.user.username : `مستخدم ${entry.userId}`;
-        desc += `**#${rank}** ${name} - \`${entry.pt} PT\`\n`;
+        desc += `#${rank} ${name} - المستوى ${entry.level} (XP: ${entry.xp})\n`;
         rank++;
       }
-      const embed = new EmbedBuilder().setTitle('🏆 ترتيب أغنى 10 أشخاص').setDescription(desc).setColor(0x2b2d31).setTimestamp();
+      const embed = new EmbedBuilder().setTitle('🏆 ترتيب المستويات').setColor(0x2b2d31).setDescription(desc).setFooter({ text: 'أعلى 10 أعضاء' });
+      if (generalImage) embed.setImage(generalImage);
       await message.channel.send({ embeds: [embed] });
-      return;
-    }
-
-    if (cmd === 'اعطاء_عملات' || cmd === 'اعطاء_عمله') {
-      if (!(await hasPermission(message.member, guildId))) {
-        await message.reply('❌ تحتاج صلاحية متحكم.');
-        return;
-      }
-      const target = message.mentions.members.first();
-      const amount = parseInt(args[0]);
-      if (!target || !amount || amount <= 0) {
-        await message.reply('⚠️ الاستخدام: `!اعطاء_عملات @شخص <المبلغ>`');
-        return;
-      }
-      if (target.user.bot) {
-        await message.reply('❌ لا يمكن إعطاء البوتات.');
-        return;
-      }
-      const user = await getUser(guildId, target.id);
-      user.pt += amount;
-      await user.save();
-      const embed = new EmbedBuilder()
-        .setTitle('✅ تم إعطاء العملات')
-        .setDescription(`تم إعطاء <@${target.id}> **${amount} PT** بنجاح.\nرصيده الآن: **${user.pt} PT**`)
-        .setColor(0x2b2d31);
-      await message.channel.send({ embeds: [embed] });
-      try {
-        const dmEmbed = new EmbedBuilder()
-          .setTitle('💰 استلام PT')
-          .setDescription(`تم إعطاؤك **${amount} PT** في **${message.guild.name}**!\nرصيدك الحالي: **${user.pt} PT**`)
-          .setColor(0x2b2d31);
-        await target.send({ embeds: [dmEmbed] }).catch(() => {});
-      } catch (e) {}
-      return;
-    }
-
-    if (cmd === 'سحب_عملات' || cmd === 'سحب_عمله') {
-      if (!(await hasPermission(message.member, guildId))) {
-        await message.reply('❌ تحتاج صلاحية متحكم.');
-        return;
-      }
-      const target = message.mentions.members.first();
-      const amount = parseInt(args[0]);
-      if (!target || !amount || amount <= 0) {
-        await message.reply('⚠️ الاستخدام: `!سحب_عملات @شخص <المبلغ>`');
-        return;
-      }
-      if (target.user.bot) {
-        await message.reply('❌ لا يمكن السحب من البوتات.');
-        return;
-      }
-      const user = await getUser(guildId, target.id);
-      if (user.pt < amount) {
-        await message.reply(`⚠️ رصيده غير كافٍ. لديه **${user.pt} PT** فقط.`);
-        return;
-      }
-      user.pt -= amount;
-      await user.save();
-      const embed = new EmbedBuilder()
-        .setTitle('✅ تم سحب العملات')
-        .setDescription(`تم سحب **${amount} PT** من <@${target.id}>.\nرصيده الآن: **${user.pt} PT**`)
-        .setColor(0x2b2d31);
-      await message.channel.send({ embeds: [embed] });
-      return;
-    }
-
-    if (cmd === 'مصرف') {
-      const user = await getUser(guildId, message.author.id);
-      const now = Date.now();
-      const last = user.lastDaily ? user.lastDaily.getTime() : 0;
-      if (now - last < 24 * 60 * 60 * 1000) {
-        const remaining = 24 * 60 * 60 * 1000 - (now - last);
-        const hours = Math.floor(remaining / (60 * 60 * 1000));
-        await message.reply(`⏳ يمكنك الحصول على الراتب بعد ${hours} ساعة.`);
-        return;
-      }
-      const salary = config.dailySalary || 5;
-      user.pt += salary;
-      user.lastDaily = new Date();
-      await user.save();
-      await message.reply(`✅ تم إضافة **${salary} PT** كراتب يومي. رصيدك الآن: **${user.pt} PT**`);
       return;
     }
 
@@ -2850,7 +2638,7 @@ client.on('messageCreate', async (message) => {
         return {
           label: role ? role.name : 'رتبة غير موجودة',
           value: item._id.toString(),
-          description: `${item.price} PT`,
+          description: `${item.price}`,
           emoji: '🛒',
         };
       });
@@ -2996,9 +2784,8 @@ client.on('messageCreate', async (message) => {
             { name: '🚪 دور الدخول', value: '`دور_دخول @دور`' },
             { name: '💡 الاقتراحات', value: '`قناة_اقتراح #قناة`، `عنوان_اقتراح نص`، `وصف_اقتراح نص`، `لون_اقتراح #هيكس`، `صورة_اقتراح رابط`' },
             { name: '👑 الإدارة', value: '`رتبة_اداري_علوي @رتبة`، `رتبة_اداري_صغري @رتبة`، `رتبة_مسؤول_اجازات @رتبة`، `رتبة_تحكم_البوت @رتبة`' },
-            { name: '💰 المالية', value: '`نقاط_المهمة [عدد]`، `راتب_يومي [عدد]`، `نقاط_الترقية [عدد]`' },
-            { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة السعر [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '📌 القنوات', value: '`قناة_المهام #قناة`، `قناة_الاجازات #قناة`، `قناة_المودات #قناة`' },
+            { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة [السعر] [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '🖼️ بانل الإجازات', value: '`صورة_بانل_اجازات [رابط]`' },
             { name: '👤 رتبة البائع', value: '`رتبة_بائع @رتبة`' }
           )
@@ -3407,14 +3194,6 @@ client.on('messageCreate', async (message) => {
         return;
       }
 
-      if (sub === 'راتب_يومي') {
-        const salary = parseInt(value);
-        if (!salary || salary < 0) { await message.reply('⚠️ أدخل راتباً صحيحاً.'); return; }
-        await updateGuildConfig(guildId, { dailySalary: salary });
-        await message.reply(`✅ تم تعيين الراتب اليومي: ${salary} PT`);
-        return;
-      }
-
       if (sub === 'نقاط_الترقية') {
         const pts = parseInt(value);
         if (!pts || pts < 1) { await message.reply('⚠️ أدخل عدد نقاط صحيح.'); return; }
@@ -3432,7 +3211,7 @@ client.on('messageCreate', async (message) => {
           return;
         }
         await addStoreItem(guildId, role.id, price, desc || 'لا يوجد وصف');
-        await message.reply(`✅ تم إضافة المنتج ${role} بسعر ${price} PT`);
+        await message.reply(`✅ تم إضافة المنتج ${role} بسعر ${price}`);
         return;
       }
 
@@ -3489,51 +3268,17 @@ client.on('messageCreate', async (message) => {
         .setColor(0x2b2d31)
         .addFields(
           { name: '👑 نظام التحكم', value: '`متحكم @شخص` `الغاء_متحكم @شخص` `قائمة_المتحكمين`', inline: false },
-          { name: '📋 المهام', value: '`!لوحة_المهام` (للمدراء العلويين) – مع نقاط PT + نقاط إدارية وإثبات', inline: false },
+          { name: '📋 المهام', value: '`!لوحة_المهام` (للمدراء العلويين) – مع نقاط إدارية وإثبات', inline: false },
           { name: '📅 الإجازات', value: '`!بانل_اجازات` (لوحة تحكم موحدة للمسؤول)\n`!طلب_اجازة` (للإداريين)\n**أوامر سلاش:** `/بانل_اجازات` `/الاجازات_الحالية` `/سجل_الاجازات`', inline: false },
-          { name: '💰 العملة', value: '`!رصيدي` (يعرض PT + نقاط إدارية)\n`!مصرف` (راتب يومي)\n`!اعطاء_عملات` و `!سحب_عملات` (للمتحكمين)\n`!توب` (ترتيب العملة)\n**مكافآت تلقائية:** 15 PT كل 30 رسالة، 1 PT كل دقيقة في الفويس (تُرسل عند الخروج)', inline: false },
           { name: '🛒 المتجر', value: '`!بانل_اضافة_منتج` (للمتحكمين) – لإضافة منتج\n`!متجر` – شراء رتبة عبر القائمة المنسدلة\nيتطلب رتبة بائع (تُعيّن بـ `!تعيين رتبة_بائع`)', inline: false },
           { name: '🔐 تسجيل الدخول', value: '`!تسجيل_الدخول` (للمودات)', inline: false },
-          { name: '📊 المستويات', value: '`!مستوى` `!ترتيب`', inline: false },
+          { name: '📊 المستويات', value: '`!مستوى` `!ترتيب`\n**ملاحظة:** يحسب المستوى في أي روم، ويُعلن في الروم المحدد', inline: false },
           { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = (ايموجي)-(اسم المستخدم)', inline: false },
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false }
         )
         .setFooter({ text: `🔥 البادئة: !` });
-      if (generalImage) embed.setImage(generalImage);
-      await message.channel.send({ embeds: [embed] });
-      return;
-    }
-
-    if (cmd === 'مستوى') {
-      const member = message.mentions.members.first() || message.member;
-      const user = await getUser(guildId, member.id);
-      const embed = new EmbedBuilder()
-        .setTitle(`📊 مستوى ${member.user.username}`)
-        .setColor(0x2b2d31)
-        .addFields(
-          { name: 'المستوى', value: `${user.level}`, inline: true },
-          { name: 'XP', value: `${user.xp}/${(user.level + 1) * 100}`, inline: true },
-          { name: 'الرسائل', value: `${user.messages}`, inline: true }
-        );
-      if (generalImage) embed.setImage(generalImage);
-      await message.channel.send({ embeds: [embed] });
-      return;
-    }
-
-    if (cmd === 'ترتيب') {
-      const top = await User.find({ guildId }).sort({ level: -1, xp: -1 }).limit(10);
-      if (!top.length) return message.reply('📭 لا توجد بيانات مستويات.');
-      let desc = '';
-      let rank = 1;
-      for (const entry of top) {
-        const member = message.guild.members.cache.get(entry.userId);
-        const name = member ? member.user.username : `مستخدم ${entry.userId}`;
-        desc += `#${rank} ${name} - المستوى ${entry.level} (XP: ${entry.xp})\n`;
-        rank++;
-      }
-      const embed = new EmbedBuilder().setTitle('🏆 ترتيب المستويات').setColor(0x2b2d31).setDescription(desc).setFooter({ text: 'أعلى 10 أعضاء' });
       if (generalImage) embed.setImage(generalImage);
       await message.channel.send({ embeds: [embed] });
       return;
