@@ -333,6 +333,7 @@ async function saveTicketMessages(channel) {
     }
     log.messages = savedMessages.reverse();
     await log.save();
+    console.log(`✅ تم حفظ ${savedMessages.length} رسالة للتذكرة ${channel.name}`);
     return true;
   } catch (error) {
     console.error('❌ خطأ في حفظ رسائل التذكرة:', error);
@@ -913,7 +914,7 @@ client.on('interactionCreate', async (interaction) => {
           { name: '🛒 المتجر', value: '`!بانل_اضافة_منتج` (للمتحكمين) – لإضافة منتج\n`!متجر` – شراء رتبة عبر القائمة المنسدلة\nيتطلب رتبة بائع (تُعيّن بـ `!تعيين رتبة_بائع`)', inline: false },
           { name: '🔐 تسجيل الدخول', value: '`!تسجيل_الدخول` (للمودات)', inline: false },
           { name: '📊 المستويات', value: '`!مستوى` `!ترتيب`\n**ملاحظة:** يحسب المستوى في أي روم، ويُعلن في الروم المحدد', inline: false },
-          { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = (ايموجي)-(اسم المستخدم)', inline: false },
+          { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = 🎫-(اسم المستخدم)', inline: false },
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false }
@@ -1452,7 +1453,7 @@ client.on('interactionCreate', async (interaction) => {
             { name: '💡 الاقتراحات', value: '`قناة_اقتراح #قناة`، `عنوان_اقتراح نص`، `وصف_اقتراح نص`، `لون_اقتراح #هيكس`، `صورة_اقتراح رابط`' },
             { name: '👑 الإدارة', value: '`رتبة_اداري_علوي @رتبة`، `رتبة_اداري_صغري @رتبة`، `رتبة_مسؤول_اجازات @رتبة`، `رتبة_تحكم_البوت @رتبة`' },
             { name: '📌 القنوات', value: '`قناة_المهام #قناة`، `قناة_الاجازات #قناة`، `قناة_المودات #قناة`' },
-            { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة السعر [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
+            { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة [السعر] [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '🖼️ بانل الإجازات', value: '`صورة_بانل_اجازات [رابط]`' },
             { name: '👤 رتبة البائع', value: '`رتبة_بائع @رتبة`' }
           )
@@ -1745,6 +1746,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // 🔹 تعديل اسم التذكرة في إعادة الفتح إلى 🎫-{username}
     if (interaction.customId.startsWith('restart_ticket_')) {
       const logId = interaction.customId.split('_')[2];
       const oldLog = await TicketLog.findById(logId);
@@ -1755,12 +1757,12 @@ client.on('interactionCreate', async (interaction) => {
       settings.ticketCounter += 1;
       await settings.save();
       const ticketNumber = settings.ticketCounter;
-      const emoji = section.emoji || '📌';
       const role = section.roleId ? interaction.guild.roles.cache.get(section.roleId) : null;
       const user = await interaction.guild.members.fetch(oldLog.userId).catch(() => null);
+      // 🔹 اسم التذكرة = 🎫-{username}
       const username = user ? user.displayName.replace(/\s/g, '_') : 'user';
       const channel = await interaction.guild.channels.create({
-        name: `${emoji}-${username}`,
+        name: `🎫-${username}`,
         type: ChannelType.GuildText,
         parent: interaction.channel.parentId,
         permissionOverwrites: [
@@ -1880,8 +1882,6 @@ client.on('interactionCreate', async (interaction) => {
         if (!role) {
           return interaction.reply({ content: '❌ الرتبة غير موجودة.', ephemeral: true });
         }
-        // التحقق من الرصيد (تم إزالته، لكن نظرياً لا يوجد رصيد الآن)
-        // سنمرر الشراء مباشرة
         await member.roles.add(role);
         purchase.status = 'completed';
         await purchase.save();
@@ -2283,7 +2283,7 @@ client.on('interactionCreate', async (interaction) => {
   // ============================================================
 
   if (interaction.isStringSelectMenu()) {
-    // ----- قائمة التذاكر -----
+    // ----- قائمة التذاكر 🔹 تعديل اسم التذكرة إلى 🎫-{username} -----
     if (interaction.customId === 'ticket_menu') {
       const sectionName = interaction.values[0];
       const settings = await getTicketSettings(guildId);
@@ -2294,11 +2294,11 @@ client.on('interactionCreate', async (interaction) => {
       settings.ticketCounter += 1;
       await settings.save();
       const ticketNumber = settings.ticketCounter;
-      const emoji = section.emoji || '📌';
       const role = section.roleId ? interaction.guild.roles.cache.get(section.roleId) : null;
+      // 🔹 اسم التذكرة = 🎫-{username}
       const username = interaction.user.displayName.replace(/\s/g, '_');
       const channel = await interaction.guild.channels.create({
-        name: `${emoji}-${username}`,
+        name: `🎫-${username}`,
         type: ChannelType.GuildText,
         parent: interaction.channel.parentId,
         permissionOverwrites: [
@@ -3273,7 +3273,7 @@ client.on('messageCreate', async (message) => {
           { name: '🛒 المتجر', value: '`!بانل_اضافة_منتج` (للمتحكمين) – لإضافة منتج\n`!متجر` – شراء رتبة عبر القائمة المنسدلة\nيتطلب رتبة بائع (تُعيّن بـ `!تعيين رتبة_بائع`)', inline: false },
           { name: '🔐 تسجيل الدخول', value: '`!تسجيل_الدخول` (للمودات)', inline: false },
           { name: '📊 المستويات', value: '`!مستوى` `!ترتيب`\n**ملاحظة:** يحسب المستوى في أي روم، ويُعلن في الروم المحدد', inline: false },
-          { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = (ايموجي)-(اسم المستخدم)', inline: false },
+          { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = 🎫-(اسم المستخدم)', inline: false },
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false }
