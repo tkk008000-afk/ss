@@ -914,7 +914,7 @@ client.on('interactionCreate', async (interaction) => {
           { name: '🛒 المتجر', value: '`!بانل_اضافة_منتج` (للمتحكمين) – لإضافة منتج\n`!متجر` – شراء رتبة عبر القائمة المنسدلة\nيتطلب رتبة بائع (تُعيّن بـ `!تعيين رتبة_بائع`)', inline: false },
           { name: '🔐 تسجيل الدخول', value: '`!تسجيل_الدخول` (للمودات)', inline: false },
           { name: '📊 المستويات', value: '`!مستوى` `!ترتيب`\n**ملاحظة:** يحسب المستوى في أي روم، ويُعلن في الروم المحدد', inline: false },
-          { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = 🎫-(اسم المستخدم)', inline: false },
+          { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = (اسم المستخدم فقط)', inline: false },
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false }
@@ -1746,7 +1746,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // 🔹 تعديل اسم التذكرة في إعادة الفتح إلى 🎫-{username}
+    // 🔹 تعديل اسم التذكرة في إعادة الفتح إلى اسم المستخدم فقط
     if (interaction.customId.startsWith('restart_ticket_')) {
       const logId = interaction.customId.split('_')[2];
       const oldLog = await TicketLog.findById(logId);
@@ -1759,10 +1759,10 @@ client.on('interactionCreate', async (interaction) => {
       const ticketNumber = settings.ticketCounter;
       const role = section.roleId ? interaction.guild.roles.cache.get(section.roleId) : null;
       const user = await interaction.guild.members.fetch(oldLog.userId).catch(() => null);
-      // 🔹 اسم التذكرة = 🎫-{username}
+      // 🔹 اسم التذكرة = اسم المستخدم فقط
       const username = user ? user.displayName.replace(/\s/g, '_') : 'user';
       const channel = await interaction.guild.channels.create({
-        name: `🎫-${username}`,
+        name: `${username}`,
         type: ChannelType.GuildText,
         parent: interaction.channel.parentId,
         permissionOverwrites: [
@@ -2283,7 +2283,7 @@ client.on('interactionCreate', async (interaction) => {
   // ============================================================
 
   if (interaction.isStringSelectMenu()) {
-    // ----- قائمة التذاكر 🔹 تعديل اسم التذكرة إلى 🎫-{username} -----
+    // ----- قائمة التذاكر 🔹 تعديل اسم التذكرة إلى اسم المستخدم فقط -----
     if (interaction.customId === 'ticket_menu') {
       const sectionName = interaction.values[0];
       const settings = await getTicketSettings(guildId);
@@ -2295,10 +2295,10 @@ client.on('interactionCreate', async (interaction) => {
       await settings.save();
       const ticketNumber = settings.ticketCounter;
       const role = section.roleId ? interaction.guild.roles.cache.get(section.roleId) : null;
-      // 🔹 اسم التذكرة = 🎫-{username}
+      // 🔹 اسم التذكرة = اسم المستخدم فقط
       const username = interaction.user.displayName.replace(/\s/g, '_');
       const channel = await interaction.guild.channels.create({
-        name: `🎫-${username}`,
+        name: `${username}`,
         type: ChannelType.GuildText,
         parent: interaction.channel.parentId,
         permissionOverwrites: [
@@ -3273,7 +3273,7 @@ client.on('messageCreate', async (message) => {
           { name: '🛒 المتجر', value: '`!بانل_اضافة_منتج` (للمتحكمين) – لإضافة منتج\n`!متجر` – شراء رتبة عبر القائمة المنسدلة\nيتطلب رتبة بائع (تُعيّن بـ `!تعيين رتبة_بائع`)', inline: false },
           { name: '🔐 تسجيل الدخول', value: '`!تسجيل_الدخول` (للمودات)', inline: false },
           { name: '📊 المستويات', value: '`!مستوى` `!ترتيب`\n**ملاحظة:** يحسب المستوى في أي روم، ويُعلن في الروم المحدد', inline: false },
-          { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = 🎫-(اسم المستخدم)', inline: false },
+          { name: '🎫 التذاكر', value: '`!بانل` `!عرض_تذكرة` `!تعيين تذكرة`\n`!لوق_تذكرة` (داخل التذكرة)\n**ملاحظة:** اسم التذكرة = (اسم المستخدم فقط)', inline: false },
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false }
