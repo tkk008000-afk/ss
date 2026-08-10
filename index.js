@@ -964,8 +964,7 @@ async function sendRolesPanel(channel, config, guildId) {
 // ============================================================
 
 /**
- * توليد إمبيد خريطة السيرفر بناءً على الأقسام المحددة في MapConfig.
- * إذا لم تكن هناك أقسام، تظهر رسالة "لا توجد أقسام محددة."
+ * توليد إمبيد خريطة السيرفر مع أسماء الأقسام فقط (بدون سرد القنوات في الحقول)
  */
 async function generateServerMapEmbed(guild, member, config, mapConfig) {
   const embed = new EmbedBuilder()
@@ -981,32 +980,19 @@ async function generateServerMapEmbed(guild, member, config, mapConfig) {
     if (generalImage) embed.setImage(generalImage);
   }
 
+  // عرض أسماء الأقسام مع عدد القنوات
   if (!mapConfig.sections || mapConfig.sections.length === 0) {
     embed.addFields({ name: '📭', value: 'لا توجد أقسام محددة. استخدم زر "إضافة قسم" لإضافة قسم.', inline: false });
-    return embed;
+  } else {
+    let sectionsList = '';
+    for (let i = 0; i < mapConfig.sections.length; i++) {
+      const section = mapConfig.sections[i];
+      const count = section.channels ? section.channels.length : 0;
+      sectionsList += `• **${section.name}** (${count} قناة)\n`;
+    }
+    embed.addFields({ name: '📂 الأقسام', value: sectionsList || '(فارغ)', inline: false });
   }
 
-  let fieldCount = 0;
-  for (const section of mapConfig.sections) {
-    if (fieldCount >= 25) break;
-    const channels = section.channels || [];
-    let channelList = '';
-    let total = 0;
-    for (const chId of channels) {
-      const channel = guild.channels.cache.get(chId);
-      if (channel && channel.isTextBased()) {
-        channelList += `  #️⃣ ${channel.name}\n`;
-        total++;
-      } else if (channel && channel.type === ChannelType.GuildVoice) {
-        channelList += `  🔊 ${channel.name}\n`;
-        total++;
-      }
-      if (channelList.length > 1024) break;
-    }
-    if (total === 0) channelList = '(لا توجد قنوات)';
-    embed.addFields({ name: `📁 ${section.name}`, value: channelList, inline: false });
-    fieldCount++;
-  }
   return embed;
 }
 
@@ -1863,13 +1849,33 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ===== أمر الخريطة (سلاش) =====
     if (commandName === 'خريطة') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
       }
       const mapConfig = await getMapConfig(guildId);
       const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
-      const row = new ActionRowBuilder().addComponents(
+      
+      // بناء الأزرار لكل قسم
+      const rows = [];
+      if (mapConfig.sections && mapConfig.sections.length > 0) {
+        // نضع أزرار الأقسام في صفوف، كل صف يحتوي على 5 أزرار كحد أقصى
+        const sectionButtons = mapConfig.sections.map((section, index) => 
+          new ButtonBuilder()
+            .setCustomId(`map_section_${index}`)
+            .setLabel(section.name)
+            .setStyle(ButtonStyle.Secondary)
+        );
+        // تقسيم إلى صفوف كل 5 أزرار
+        for (let i = 0; i < sectionButtons.length; i += 5) {
+          const chunk = sectionButtons.slice(i, i + 5);
+          rows.push(new ActionRowBuilder().addComponents(chunk));
+        }
+      }
+      
+      // إضافة أزرار التحديث والإضافة
+      const controlRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('refresh_map')
           .setLabel('🔄 تحديث')
@@ -1879,7 +1885,9 @@ client.on('interactionCreate', async (interaction) => {
           .setLabel('➕ إضافة قسم')
           .setStyle(ButtonStyle.Secondary)
       );
-      await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+      rows.push(controlRow);
+      
+      await interaction.reply({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
       return;
     }
   }
@@ -2084,6 +2092,38 @@ client.on('interactionCreate', async (interaction) => {
   // ============================================================
 
   if (interaction.isButton()) {
+    // ===== أزرار أقسام الخريطة =====
+    if (interaction.customId.startsWith('map_section_')) {
+      const index = parseInt(interaction.customId.split('_')[2]);
+      const mapConfig = await getMapConfig(guildId);
+      if (!mapConfig.sections || index >= mapConfig.sections.length) {
+        return interaction.reply({ content: '❌ القسم غير موجود.', flags: MessageFlags.Ephemeral });
+      }
+      const section = mapConfig.sections[index];
+      const channels = section.channels || [];
+      if (channels.length === 0) {
+        return interaction.reply({ content: `📭 لا توجد قنوات في قسم **${section.name}**.`, flags: MessageFlags.Ephemeral });
+      }
+      // جلب أسماء القنوات
+      let channelList = '';
+      for (const chId of channels) {
+        const channel = interaction.guild.channels.cache.get(chId);
+        if (channel) {
+          const mention = channel.toString();
+          channelList += `• ${mention}\n`;
+        } else {
+          channelList += `• معرف غير صالح: ${chId}\n`;
+        }
+      }
+      const embed = new EmbedBuilder()
+        .setTitle(`📂 قسم ${section.name}`)
+        .setDescription(`القنوات التابعة لهذا القسم:\n${channelList}`)
+        .setColor(0x2b2d31)
+        .setTimestamp();
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
     if (interaction.customId === 'change_name_ui') {
       const userId = interaction.user.id;
       const last = await getNameCooldown(userId);
@@ -2676,15 +2716,32 @@ client.on('interactionCreate', async (interaction) => {
       }
       const mapConfig = await getMapConfig(guildId);
       const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
-      const row = new ActionRowBuilder().addComponents(
+      
+      // إعادة بناء الأزرار
+      const rows = [];
+      if (mapConfig.sections && mapConfig.sections.length > 0) {
+        const sectionButtons = mapConfig.sections.map((section, index) => 
+          new ButtonBuilder()
+            .setCustomId(`map_section_${index}`)
+            .setLabel(section.name)
+            .setStyle(ButtonStyle.Secondary)
+        );
+        for (let i = 0; i < sectionButtons.length; i += 5) {
+          const chunk = sectionButtons.slice(i, i + 5);
+          rows.push(new ActionRowBuilder().addComponents(chunk));
+        }
+      }
+      const controlRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
       );
-      await interaction.update({ embeds: [embed], components: [row] });
+      rows.push(controlRow);
+      
+      await interaction.update({ embeds: [embed], components: rows });
       return;
     }
 
-    // ===== زر إضافة قسم للخريطة (تم التعديل: مودال بحقلين) =====
+    // ===== زر إضافة قسم للخريطة =====
     if (interaction.customId === 'map_add_section') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ ليس لديك صلاحية.', flags: MessageFlags.Ephemeral });
@@ -3011,13 +3068,31 @@ client.on('interactionCreate', async (interaction) => {
 
       await interaction.reply({ content: replyMsg, flags: MessageFlags.Ephemeral });
 
-      // تحديث الخريطة المعروضة
-      const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
-      );
-      await interaction.message?.edit({ embeds: [embed], components: [row] }).catch(() => {});
+      // تحديث الخريطة المعروضة (نقوم بتحديث الرسالة الأصلية إن وجدت)
+      try {
+        const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
+        const rows = [];
+        if (mapConfig.sections && mapConfig.sections.length > 0) {
+          const sectionButtons = mapConfig.sections.map((section, index) => 
+            new ButtonBuilder()
+              .setCustomId(`map_section_${index}`)
+              .setLabel(section.name)
+              .setStyle(ButtonStyle.Secondary)
+          );
+          for (let i = 0; i < sectionButtons.length; i += 5) {
+            const chunk = sectionButtons.slice(i, i + 5);
+            rows.push(new ActionRowBuilder().addComponents(chunk));
+          }
+        }
+        const controlRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
+        );
+        rows.push(controlRow);
+        await interaction.message?.edit({ embeds: [embed], components: rows }).catch(() => {});
+      } catch (e) {
+        // إذا لم تكن هناك رسالة أصلية، نتجاهل
+      }
       return;
     }
   }
@@ -3806,18 +3881,35 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // ====== أمر خريطة السيرفر ======
+    // ====== أمر خريطة السيرفر (نصي) ======
     if (cmd === 'خريطة' || cmd === 'بانل_خريطة') {
       if (!(await hasPermission(message.member, guildId))) {
         return message.reply('❌ تحتاج صلاحية متحكم.');
       }
       const mapConfig = await getMapConfig(guildId);
       const embed = await generateServerMapEmbed(message.guild, message.member, config, mapConfig);
-      const row = new ActionRowBuilder().addComponents(
+      
+      // بناء الأزرار
+      const rows = [];
+      if (mapConfig.sections && mapConfig.sections.length > 0) {
+        const sectionButtons = mapConfig.sections.map((section, index) => 
+          new ButtonBuilder()
+            .setCustomId(`map_section_${index}`)
+            .setLabel(section.name)
+            .setStyle(ButtonStyle.Secondary)
+        );
+        for (let i = 0; i < sectionButtons.length; i += 5) {
+          const chunk = sectionButtons.slice(i, i + 5);
+          rows.push(new ActionRowBuilder().addComponents(chunk));
+        }
+      }
+      const controlRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
       );
-      await message.channel.send({ embeds: [embed], components: [row] });
+      rows.push(controlRow);
+      
+      await message.channel.send({ embeds: [embed], components: rows });
       await message.reply('✅ تم إنشاء خريطة السيرفر.');
       return;
     }
