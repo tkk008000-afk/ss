@@ -934,20 +934,42 @@ async function sendRolesPanel(channel, config, guildId) {
 }
 
 // ============================================================
-// ========== دوال خريطة السيرفر (معدلة) ==========
+// ========== دوال خريطة السيرفر (معدلة لدعم صلاحيات العضو) ==========
 // ============================================================
 
-function generateServerMapEmbed(guild, config) {
-  // تصفية الأقسام والقنوات وترتيبها
-  const categories = guild.channels.cache.filter(c => c.type === ChannelType.GuildCategory).sort((a, b) => a.position - b.position);
-  const channelsWithoutCategory = guild.channels.cache.filter(c => c.type !== ChannelType.GuildCategory && !c.parentId).sort((a, b) => a.position - b.position);
+/**
+ * توليد إمبيد خريطة السيرفر بناءً على صلاحيات العضو
+ * @param {Guild} guild - كائن السيرفر
+ * @param {GuildMember} member - العضو الذي طلب الخريطة
+ * @param {Config} config - إعدادات السيرفر
+ * @returns {EmbedBuilder} إمبيد الخريطة
+ */
+function generateServerMapEmbed(guild, member, config) {
+  // تحديد ما إذا كان العضو متحكماً (يرى كل القنوات)
+  const isController = hasPermission(member, guild.id);
+  
+  // جلب جميع القنوات (نصية وصوتية وفئات)
+  const allChannels = guild.channels.cache;
+  
+  // تصفية القنوات: إذا كان متحكماً نعرض الكل، وإلا نعرض فقط القنوات التي يراها العضو
+  const filteredChannels = allChannels.filter(channel => {
+    if (isController) return true; // المتحكم يرى الكل
+    // العضو العادي: نتحقق من صلاحية ViewChannel في هذه القناة
+    const permissions = channel.permissionsFor(member);
+    return permissions && permissions.has(PermissionsBitField.Flags.ViewChannel);
+  });
+
+  // تجميع الفئات (الأقسام)
+  const categories = filteredChannels.filter(c => c.type === ChannelType.GuildCategory).sort((a, b) => a.position - b.position);
+  // القنوات التي ليس لها أب (خارج الأقسام)
+  const channelsWithoutCategory = filteredChannels.filter(c => c.type !== ChannelType.GuildCategory && !c.parentId).sort((a, b) => a.position - b.position);
 
   const fields = [];
-  const MAX_FIELD_VALUE = 1024; // الحد الأقصى لكل حقل (Discord يسمح بـ 1024 حرفاً)
+  const MAX_FIELD_VALUE = 1024;
 
   // معالجة الأقسام
   for (const [catId, category] of categories) {
-    const children = guild.channels.cache.filter(c => c.parentId === catId).sort((a, b) => a.position - b.position);
+    const children = filteredChannels.filter(c => c.parentId === catId).sort((a, b) => a.position - b.position);
     if (children.size === 0) {
       fields.push({ name: `📁 ${category.name}`, value: '(فارغ)', inline: false });
       continue;
@@ -957,7 +979,6 @@ function generateServerMapEmbed(guild, config) {
       const emoji = channel.type === ChannelType.GuildText ? '#️⃣' : '🔊';
       const line = `  ${emoji} ${channel.name}\n`;
       if (value.length + line.length > MAX_FIELD_VALUE) {
-        // إذا تجاوزنا الحد، نضيف الحقل الحالي ونبدأ حقلًا جديدًا
         fields.push({ name: `📁 ${category.name} (تابع)`, value: value, inline: false });
         value = line;
       } else {
@@ -969,7 +990,7 @@ function generateServerMapEmbed(guild, config) {
     }
   }
 
-  // القنوات العامة (التي ليس لها أب)
+  // القنوات العامة
   if (channelsWithoutCategory.size > 0) {
     let value = '';
     for (const [chId, channel] of channelsWithoutCategory) {
@@ -989,7 +1010,7 @@ function generateServerMapEmbed(guild, config) {
 
   // إذا لم يكن هناك أي محتوى
   if (fields.length === 0) {
-    fields.push({ name: '📭', value: 'لا توجد قنوات أو أقسام في هذا السيرفر.', inline: false });
+    fields.push({ name: '📭', value: 'لا توجد قنوات أو أقسام متاحة لك.', inline: false });
   }
 
   // إنشاء الإمبيد
@@ -997,9 +1018,11 @@ function generateServerMapEmbed(guild, config) {
     .setTitle(`🗺️ خريطة السيرفر: ${guild.name}`)
     .setColor(0x2b2d31)
     .setTimestamp()
-    .setFooter({ text: `عدد الأقسام: ${categories.size} | عدد القنوات: ${guild.channels.cache.size}` });
+    .setFooter({ 
+      text: `عرض ${isController ? 'جميع القنوات' : 'القنوات العامة'} | عدد الأقسام: ${categories.size} | عدد القنوات المعروضة: ${filteredChannels.size}`
+    });
 
-  // إضافة الحقول (حد أقصى 25 حقلاً)
+  // إضافة الحقول (حد أقصى 25)
   const maxFields = 25;
   const fieldsToAdd = fields.slice(0, maxFields);
   for (const field of fieldsToAdd) {
@@ -1867,10 +1890,11 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (commandName === 'خريطة') {
+      // الأمر الخاص بخريطة السيرفر مع مراعاة صلاحيات العضو
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
       }
-      const embed = generateServerMapEmbed(interaction.guild, config);
+      const embed = generateServerMapEmbed(interaction.guild, interaction.member, config);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('refresh_map')
@@ -2666,7 +2690,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ ليس لديك صلاحية.', flags: MessageFlags.Ephemeral });
       }
-      const embed = generateServerMapEmbed(interaction.guild, config);
+      const embed = generateServerMapEmbed(interaction.guild, interaction.member, config);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('refresh_map')
@@ -3362,12 +3386,12 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // ====== أمر خريطة السيرفر ======
+    // ====== أمر خريطة السيرفر (النصي) ======
     if (cmd === 'خريطة' || cmd === 'بانل_خريطة') {
       if (!(await hasPermission(message.member, guildId))) {
         return message.reply('❌ تحتاج صلاحية متحكم.');
       }
-      const embed = generateServerMapEmbed(message.guild, config);
+      const embed = generateServerMapEmbed(message.guild, message.member, config);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('refresh_map')
