@@ -2983,22 +2983,41 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== مودال اسم القسم للخريطة =====
+    // ===== مودال اسم القسم للخريطة (تم التعديل هنا) =====
     if (interaction.customId === 'map_section_name_modal') {
       const sectionName = interaction.fields.getTextInputValue('map_section_name');
       if (!tempMapData) tempMapData = {};
       const userKey = `${guildId}_${interaction.user.id}`;
       tempMapData[userKey] = { sectionName };
-      const channels = interaction.guild.channels.cache.filter(c => c.type === ChannelType.GuildText || c.type === ChannelType.GuildVoice);
+
+      // جلب القنوات النصية والصوتية فقط
+      const channels = interaction.guild.channels.cache.filter(
+        c => c.type === ChannelType.GuildText || c.type === ChannelType.GuildVoice
+      );
       if (channels.size === 0) {
         return interaction.reply({ content: '⚠️ لا توجد قنوات نصية أو صوتية في السيرفر.', flags: MessageFlags.Ephemeral });
       }
-      const options = channels.map(ch => ({
+
+      // بناء قائمة الخيارات (أقصى حد 25)
+      let options = channels.map(ch => ({
         label: ch.name,
         value: ch.id,
         emoji: ch.type === ChannelType.GuildText ? '#' : '🔊',
         description: ch.type === ChannelType.GuildText ? 'نصي' : 'صوتي'
       }));
+
+      // التأكد من أن الخيارات لا تتجاوز 25 (الحد الأقصى للقائمة المنسدلة)
+      if (options.length > 25) {
+        // اختيار أول 25 قناة فقط (يمكنك تغيير المنطق حسب رغبتك)
+        options = options.slice(0, 25);
+        // إرسال تنبيه اختياري
+        await interaction.reply({
+          content: `⚠️ يوجد ${channels.size} قناة في السيرفر، سيتم عرض أول 25 فقط. اختر القنوات المطلوبة لهذا القسم.`,
+          flags: MessageFlags.Ephemeral
+        });
+        // نستمر في عرض القائمة المختصرة
+      }
+
       const row = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('map_select_channels')
@@ -3007,7 +3026,12 @@ client.on('interactionCreate', async (interaction) => {
           .setMaxValues(Math.min(options.length, 25))
           .addOptions(options)
       );
-      await interaction.reply({ content: `📁 اختر القنوات التي تنتمي إلى القسم **${sectionName}**:`, components: [row], flags: MessageFlags.Ephemeral });
+
+      await interaction.reply({
+        content: `📁 اختر القنوات التي تنتمي إلى القسم **${sectionName}**:`,
+        components: [row],
+        flags: MessageFlags.Ephemeral
+      });
       return;
     }
   }
