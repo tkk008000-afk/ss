@@ -2072,34 +2072,10 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== قائمة اختيار القنوات عند إضافة قسم للخريطة =====
+    // ===== قائمة اختيار القنوات عند إضافة قسم للخريطة (لم نعد نستخدمها، لكن نتركها للتوافق) =====
     if (interaction.customId === 'map_select_channels') {
-      const selectedChannelIds = interaction.values;
-      if (!tempMapData) tempMapData = {};
-      const userKey = `${guildId}_${interaction.user.id}`;
-      const sectionName = tempMapData[userKey]?.sectionName;
-      if (!sectionName) {
-        return interaction.reply({ content: '⚠️ حدث خطأ، يرجى المحاولة مرة أخرى.', flags: MessageFlags.Ephemeral });
-      }
-      const mapConfig = await getMapConfig(guildId);
-      // التحقق من وجود قسم بنفس الاسم
-      const existingIndex = mapConfig.sections.findIndex(s => s.name === sectionName);
-      if (existingIndex !== -1) {
-        mapConfig.sections[existingIndex].channels = selectedChannelIds;
-      } else {
-        mapConfig.sections.push({ name: sectionName, channels: selectedChannelIds });
-      }
-      await mapConfig.save();
-      delete tempMapData[userKey];
-      await interaction.reply({ content: `✅ تم إضافة القسم **${sectionName}** مع ${selectedChannelIds.length} قناة.`, flags: MessageFlags.Ephemeral });
-      // تحديث الخريطة المعروضة
-      const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
-      );
-      await interaction.message.edit({ embeds: [embed], components: [row] }).catch(() => {});
-      return;
+      // تم استبدال هذه الآلية بالمودال المباشر، لذا نعيد تنبيه
+      return interaction.reply({ content: '⚠️ تم تحديث النظام: يرجى استخدام المودال لإدخال معرفات القنوات.', flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -2708,13 +2684,13 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== زر إضافة قسم للخريطة =====
+    // ===== زر إضافة قسم للخريطة (تم التعديل: مودال بحقلين) =====
     if (interaction.customId === 'map_add_section') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ ليس لديك صلاحية.', flags: MessageFlags.Ephemeral });
       }
       const modal = new ModalBuilder()
-        .setCustomId('map_section_name_modal')
+        .setCustomId('map_section_modal')
         .setTitle('📁 إضافة قسم جديد')
         .addComponents(
           new ActionRowBuilder().addComponents(
@@ -2725,6 +2701,14 @@ client.on('interactionCreate', async (interaction) => {
               .setRequired(true)
               .setMinLength(2)
               .setMaxLength(50)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('map_channels_ids')
+              .setLabel('معرفات القنوات (مفصولة بفاصلة أو مسافة)')
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(true)
+              .setPlaceholder('مثال: 123456789, 987654321, 112233445566')
           )
         );
       await interaction.showModal(modal);
@@ -2983,55 +2967,57 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== مودال اسم القسم للخريطة (تم التعديل هنا) =====
-    if (interaction.customId === 'map_section_name_modal') {
+    // ===== مودال إضافة قسم الخريطة (جديد) =====
+    if (interaction.customId === 'map_section_modal') {
       const sectionName = interaction.fields.getTextInputValue('map_section_name');
-      if (!tempMapData) tempMapData = {};
-      const userKey = `${guildId}_${interaction.user.id}`;
-      tempMapData[userKey] = { sectionName };
+      const channelsInput = interaction.fields.getTextInputValue('map_channels_ids');
 
-      // جلب القنوات النصية والصوتية فقط
-      const channels = interaction.guild.channels.cache.filter(
-        c => c.type === ChannelType.GuildText || c.type === ChannelType.GuildVoice
-      );
-      if (channels.size === 0) {
-        return interaction.reply({ content: '⚠️ لا توجد قنوات نصية أو صوتية في السيرفر.', flags: MessageFlags.Ephemeral });
+      // استخراج المعرفات من النص (أرقام فقط)
+      const ids = channelsInput.match(/\d{17,20}/g) || [];
+      if (ids.length === 0) {
+        return interaction.reply({ content: '⚠️ لم يتم العثور على معرفات صالحة. تأكد من إدخال معرفات القنوات (أرقام).', flags: MessageFlags.Ephemeral });
       }
 
-      // بناء قائمة الخيارات (أقصى حد 25)
-      let options = channels.map(ch => ({
-        label: ch.name,
-        value: ch.id,
-        emoji: ch.type === ChannelType.GuildText ? '#' : '🔊',
-        description: ch.type === ChannelType.GuildText ? 'نصي' : 'صوتي'
-      }));
-
-      // التأكد من أن الخيارات لا تتجاوز 25 (الحد الأقصى للقائمة المنسدلة)
-      if (options.length > 25) {
-        // اختيار أول 25 قناة فقط (يمكنك تغيير المنطق حسب رغبتك)
-        options = options.slice(0, 25);
-        // إرسال تنبيه اختياري
-        await interaction.reply({
-          content: `⚠️ يوجد ${channels.size} قناة في السيرفر، سيتم عرض أول 25 فقط. اختر القنوات المطلوبة لهذا القسم.`,
-          flags: MessageFlags.Ephemeral
-        });
-        // نستمر في عرض القائمة المختصرة
+      // التحقق من صحة المعرفات
+      const validIds = [];
+      const invalidIds = [];
+      for (const id of ids) {
+        const channel = interaction.guild.channels.cache.get(id);
+        if (channel && (channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildVoice)) {
+          validIds.push(id);
+        } else {
+          invalidIds.push(id);
+        }
       }
 
+      if (validIds.length === 0) {
+        return interaction.reply({ content: '❌ لم يتم العثور على قنوات صالحة (نصية أو صوتية) بهذه المعرفات.', flags: MessageFlags.Ephemeral });
+      }
+
+      // حفظ القسم في قاعدة البيانات
+      const mapConfig = await getMapConfig(guildId);
+      const existingIndex = mapConfig.sections.findIndex(s => s.name === sectionName);
+      if (existingIndex !== -1) {
+        mapConfig.sections[existingIndex].channels = validIds;
+      } else {
+        mapConfig.sections.push({ name: sectionName, channels: validIds });
+      }
+      await mapConfig.save();
+
+      let replyMsg = `✅ تم إضافة القسم **${sectionName}** مع ${validIds.length} قناة.`;
+      if (invalidIds.length > 0) {
+        replyMsg += `\n⚠️ المعرفات التالية غير صالحة أو ليست قنوات نصية/صوتية: ${invalidIds.join(', ')}`;
+      }
+
+      await interaction.reply({ content: replyMsg, flags: MessageFlags.Ephemeral });
+
+      // تحديث الخريطة المعروضة
+      const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
       const row = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('map_select_channels')
-          .setPlaceholder('اختر القنوات التابعة لهذا القسم')
-          .setMinValues(1)
-          .setMaxValues(Math.min(options.length, 25))
-          .addOptions(options)
+        new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
       );
-
-      await interaction.reply({
-        content: `📁 اختر القنوات التي تنتمي إلى القسم **${sectionName}**:`,
-        components: [row],
-        flags: MessageFlags.Ephemeral
-      });
+      await interaction.message?.edit({ embeds: [embed], components: [row] }).catch(() => {});
       return;
     }
   }
