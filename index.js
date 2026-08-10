@@ -596,6 +596,7 @@ function getHelpData() {
         { name: 'بينق', value: 'عرض سرعة الاستجابة', inline: true },
         { name: 'تغيير_اسم', value: 'فتح لوحة تغيير الاسم', inline: true },
         { name: 'رتب', value: 'فتح لوحة الرتب (قائمة منسدلة)', inline: true },
+        { name: 'خريطة', value: 'عرض خريطة السيرفر (القنوات والأقسام)', inline: true },
       ]
     },
     'admin': {
@@ -933,6 +934,61 @@ async function sendRolesPanel(channel, config, guildId) {
 }
 
 // ============================================================
+// ========== دوال خريطة السيرفر ==========
+// ============================================================
+
+/**
+ * توليد إمبيد خريطة السيرفر
+ * @param {Guild} guild - كائن السيرفر
+ * @param {Config} config - إعدادات السيرفر
+ * @returns {EmbedBuilder} إمبيد يحتوي على هيكل القنوات والأقسام
+ */
+function generateServerMapEmbed(guild, config) {
+  // ترتيب القنوات: الأقسام (Categories) أولاً، ثم القنوات داخل كل قسم، ثم القنوات بدون قسم
+  const categories = guild.channels.cache.filter(c => c.type === ChannelType.GuildCategory).sort((a, b) => a.position - b.position);
+  const channelsWithoutCategory = guild.channels.cache.filter(c => c.type !== ChannelType.GuildCategory && !c.parentId).sort((a, b) => a.position - b.position);
+
+  let mapText = '';
+
+  // التعامل مع الأقسام
+  for (const [catId, category] of categories) {
+    const children = guild.channels.cache.filter(c => c.parentId === catId).sort((a, b) => a.position - b.position);
+    if (children.size === 0) {
+      mapText += `\n📁 **${category.name}** (فارغ)`;
+      continue;
+    }
+    mapText += `\n📁 **${category.name}**`;
+    for (const [chId, channel] of children) {
+      const emoji = channel.type === ChannelType.GuildText ? '#️⃣' : '🔊';
+      mapText += `\n  ${emoji} ${channel.name}`;
+    }
+  }
+
+  // القنوات التي ليس لها أب (خارج الأقسام)
+  if (channelsWithoutCategory.size > 0) {
+    mapText += '\n\n**قنوات عامة**';
+    for (const [chId, channel] of channelsWithoutCategory) {
+      const emoji = channel.type === ChannelType.GuildText ? '#️⃣' : '🔊';
+      mapText += `\n  ${emoji} ${channel.name}`;
+    }
+  }
+
+  if (!mapText) mapText = 'لا توجد قنوات أو أقسام في هذا السيرفر.';
+
+  const embed = new EmbedBuilder()
+    .setTitle(`🗺️ خريطة السيرفر: ${guild.name}`)
+    .setDescription(mapText)
+    .setColor(0x2b2d31)
+    .setTimestamp()
+    .setFooter({ text: `عدد الأقسام: ${categories.size} | عدد القنوات: ${guild.channels.cache.size}` });
+
+  const generalImage = getGeneralImage(guild, config);
+  if (generalImage) embed.setImage(generalImage);
+
+  return embed;
+}
+
+// ============================================================
 // ========== العميل ==========
 // ============================================================
 
@@ -979,6 +1035,7 @@ client.once('clientReady', async () => {
       new SlashCommandBuilder().setName('بانل_اقتراح').setDescription('إنشاء لوحة الاقتراحات'),
       new SlashCommandBuilder().setName('رتب').setDescription('فتح لوحة الرتب (قائمة منسدلة)'),
       new SlashCommandBuilder().setName('اضافة_رتبة').setDescription('إضافة رتبة جديدة إلى القائمة (للمتحكمين)').addStringOption(opt => opt.setName('الاسم').setDescription('اسم الرتبة الجديدة').setRequired(true)),
+      new SlashCommandBuilder().setName('خريطة').setDescription('عرض خريطة السيرفر (القنوات والأقسام)'),
     ].map(cmd => cmd.toJSON());
 
     const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -1783,6 +1840,22 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
+
+    if (commandName === 'خريطة') {
+      // الأمر الخاص بخريطة السيرفر
+      if (!(await hasPermission(interaction.member, guildId))) {
+        return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
+      }
+      const embed = generateServerMapEmbed(interaction.guild, config);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('refresh_map')
+          .setLabel('🔄 تحديث')
+          .setStyle(ButtonStyle.Secondary)
+      );
+      await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+      return;
+    }
   }
 
   // ============================================================
@@ -2563,6 +2636,22 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: 'اختر المهمة التي تريد إنهاءها:', components: [row], flags: MessageFlags.Ephemeral });
       return;
     }
+
+    // ===== زر تحديث الخريطة =====
+    if (interaction.customId === 'refresh_map') {
+      if (!(await hasPermission(interaction.member, guildId))) {
+        return interaction.reply({ content: '❌ ليس لديك صلاحية.', flags: MessageFlags.Ephemeral });
+      }
+      const embed = generateServerMapEmbed(interaction.guild, config);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('refresh_map')
+          .setLabel('🔄 تحديث')
+          .setStyle(ButtonStyle.Secondary)
+      );
+      await interaction.update({ embeds: [embed], components: [row] });
+      return;
+    }
   }
 
   // ============================================================
@@ -3246,6 +3335,23 @@ client.on('messageCreate', async (message) => {
       const list = controllers.map(id => `<@${id}>`).join('\n');
       const embed = new EmbedBuilder().setTitle('🛡️ قائمة المتحكمين').setColor(0x2b2d31).setDescription(list);
       await message.channel.send({ embeds: [embed] });
+      return;
+    }
+
+    // ====== أمر خريطة السيرفر ======
+    if (cmd === 'خريطة' || cmd === 'بانل_خريطة') {
+      if (!(await hasPermission(message.member, guildId))) {
+        return message.reply('❌ تحتاج صلاحية متحكم.');
+      }
+      const embed = generateServerMapEmbed(message.guild, config);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('refresh_map')
+          .setLabel('🔄 تحديث')
+          .setStyle(ButtonStyle.Secondary)
+      );
+      await message.channel.send({ embeds: [embed], components: [row] });
+      await message.reply('✅ تم إنشاء خريطة السيرفر.');
       return;
     }
 
