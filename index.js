@@ -1857,24 +1857,10 @@ client.on('interactionCreate', async (interaction) => {
       const mapConfig = await getMapConfig(guildId);
       const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
       
-      // بناء الأزرار لكل قسم
+      // بناء الصفوف: صف التحكم أولاً، ثم أزرار الأقسام
       const rows = [];
-      if (mapConfig.sections && mapConfig.sections.length > 0) {
-        // نضع أزرار الأقسام في صفوف، كل صف يحتوي على 5 أزرار كحد أقصى
-        const sectionButtons = mapConfig.sections.map((section, index) => 
-          new ButtonBuilder()
-            .setCustomId(`map_section_${index}`)
-            .setLabel(section.name)
-            .setStyle(ButtonStyle.Secondary)
-        );
-        // تقسيم إلى صفوف كل 5 أزرار
-        for (let i = 0; i < sectionButtons.length; i += 5) {
-          const chunk = sectionButtons.slice(i, i + 5);
-          rows.push(new ActionRowBuilder().addComponents(chunk));
-        }
-      }
       
-      // إضافة أزرار التحديث والإضافة
+      // صف التحكم (تحديث + إضافة)
       const controlRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('refresh_map')
@@ -1886,6 +1872,20 @@ client.on('interactionCreate', async (interaction) => {
           .setStyle(ButtonStyle.Secondary)
       );
       rows.push(controlRow);
+      
+      // أزرار الأقسام (كل 5 في صف)
+      if (mapConfig.sections && mapConfig.sections.length > 0) {
+        const sectionButtons = mapConfig.sections.map((section, index) => 
+          new ButtonBuilder()
+            .setCustomId(`map_section_${index}`)
+            .setLabel(section.name)
+            .setStyle(ButtonStyle.Secondary)
+        );
+        for (let i = 0; i < sectionButtons.length; i += 5) {
+          const chunk = sectionButtons.slice(i, i + 5);
+          rows.push(new ActionRowBuilder().addComponents(chunk));
+        }
+      }
       
       await interaction.reply({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
       return;
@@ -2717,8 +2717,17 @@ client.on('interactionCreate', async (interaction) => {
       const mapConfig = await getMapConfig(guildId);
       const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
       
-      // إعادة بناء الأزرار
+      // إعادة بناء الصفوف: صف التحكم أولاً، ثم أزرار الأقسام
       const rows = [];
+      
+      // صف التحكم
+      const controlRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
+      );
+      rows.push(controlRow);
+      
+      // أزرار الأقسام
       if (mapConfig.sections && mapConfig.sections.length > 0) {
         const sectionButtons = mapConfig.sections.map((section, index) => 
           new ButtonBuilder()
@@ -2731,11 +2740,6 @@ client.on('interactionCreate', async (interaction) => {
           rows.push(new ActionRowBuilder().addComponents(chunk));
         }
       }
-      const controlRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
-      );
-      rows.push(controlRow);
       
       await interaction.update({ embeds: [embed], components: rows });
       return;
@@ -3071,7 +3075,13 @@ client.on('interactionCreate', async (interaction) => {
       // تحديث الخريطة المعروضة (نقوم بتحديث الرسالة الأصلية إن وجدت)
       try {
         const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
+        // بناء الصفوف بنفس الترتيب الجديد
         const rows = [];
+        const controlRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
+        );
+        rows.push(controlRow);
         if (mapConfig.sections && mapConfig.sections.length > 0) {
           const sectionButtons = mapConfig.sections.map((section, index) => 
             new ButtonBuilder()
@@ -3084,11 +3094,6 @@ client.on('interactionCreate', async (interaction) => {
             rows.push(new ActionRowBuilder().addComponents(chunk));
           }
         }
-        const controlRow = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
-        );
-        rows.push(controlRow);
         await interaction.message?.edit({ embeds: [embed], components: rows }).catch(() => {});
       } catch (e) {
         // إذا لم تكن هناك رسالة أصلية، نتجاهل
@@ -3889,8 +3894,15 @@ client.on('messageCreate', async (message) => {
       const mapConfig = await getMapConfig(guildId);
       const embed = await generateServerMapEmbed(message.guild, message.member, config, mapConfig);
       
-      // بناء الأزرار
+      // بناء الصفوف: صف التحكم أولاً، ثم أزرار الأقسام
       const rows = [];
+      
+      const controlRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
+      );
+      rows.push(controlRow);
+      
       if (mapConfig.sections && mapConfig.sections.length > 0) {
         const sectionButtons = mapConfig.sections.map((section, index) => 
           new ButtonBuilder()
@@ -3903,11 +3915,6 @@ client.on('messageCreate', async (message) => {
           rows.push(new ActionRowBuilder().addComponents(chunk));
         }
       }
-      const controlRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
-      );
-      rows.push(controlRow);
       
       await message.channel.send({ embeds: [embed], components: rows });
       await message.reply('✅ تم إنشاء خريطة السيرفر.');
