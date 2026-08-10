@@ -1,5 +1,5 @@
 // ============================================================
-// البوت المتكامل - النسخة النهائية مع واجهة تغيير الاسم المطورة
+// البوت المتكامل - النسخة النهائية مع سجلات التذاكر (HTML) + رتب منسدلة
 // ============================================================
 
 const {
@@ -78,8 +78,25 @@ const ConfigSchema = new mongoose.Schema({
   uiDescription: { type: String, default: 'اضغط على الزر أدناه لتغيير اسمك المستعار في السيرفر.' },
   uiNoteText: { type: String, default: 'يمكنك تغيير اسمك مرة كل 5 ساعات.' },
   uiBannerUrl: { type: String, default: 'https://via.placeholder.com/800x240/1e1f22/5865f2?text=+BANNER+' },
+  // ====== حقول واجهة الرتب ======
+  rolesTitle: { type: String, default: '🔔 رتب الإشعارات' },
+  rolesDescription: { type: String, default: 'اختر الرتب التي تريد استلام إشعارات عنها من خلال القائمة المنسدلة أدناه.' },
+  rolesNote: { type: String, default: 'يمكنك اختيار رتبة أو أكثر.' },
+  rolesBanner: { type: String, default: 'https://via.placeholder.com/800x240/1e1f22/5865f2?text=ROLES+BANNER' },
 }, { timestamps: true });
 const Config = mongoose.model('Config', ConfigSchema);
+
+// ====== نموذج الرتب (للقائمة المنسدلة) ======
+const RolesListSchema = new mongoose.Schema({
+  guildId: { type: String, required: true },
+  roleId: { type: String, required: true },
+  roleName: { type: String, required: true },
+  emoji: { type: String, default: '🔔' },
+  description: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+});
+RolesListSchema.index({ guildId: 1, roleId: 1 }, { unique: true });
+const RolesList = mongoose.model('RolesList', RolesListSchema);
 
 const UserSchema = new mongoose.Schema({
   guildId: String,
@@ -294,6 +311,31 @@ async function isJuniorAdmin(member, guildId) {
   return member.roles.cache.has(config.juniorAdminRole) || await isSeniorAdmin(member, guildId);
 }
 
+// ====== دوال الرتب المنسدلة ======
+async function getRolesList(guildId) {
+  return await RolesList.find({ guildId }).sort({ roleName: 1 });
+}
+async function addRoleToList(guildId, roleId, roleName, emoji = '🔔', description = '') {
+  const existing = await RolesList.findOne({ guildId, roleId });
+  if (existing) {
+    existing.roleName = roleName;
+    existing.emoji = emoji;
+    existing.description = description;
+    await existing.save();
+    return false;
+  }
+  const newRole = new RolesList({ guildId, roleId, roleName, emoji, description });
+  await newRole.save();
+  return true;
+}
+async function removeRoleFromList(guildId, roleId) {
+  const result = await RolesList.deleteOne({ guildId, roleId });
+  return result.deletedCount > 0;
+}
+async function clearRolesList(guildId) {
+  await RolesList.deleteMany({ guildId });
+}
+
 async function getTicketSettings(guildId) {
   let settings = await TicketSettings.findOne({ guildId });
   if (!settings) {
@@ -326,7 +368,6 @@ async function saveTicketMessages(channel) {
   const log = await getTicketLogByChannel(channel.id);
   if (!log) return false;
   try {
-    // الحد الأقصى المسموح به هو 100
     const messages = await channel.messages.fetch({ limit: 100 });
     const savedMessages = [];
     for (const msg of messages.values()) {
@@ -492,7 +533,6 @@ async function generateTicketHTML(channel, logData) {
     messages = logData.messages;
   } else {
     try {
-      // الحد الأقصى 100
       const fetched = await channel.messages.fetch({ limit: 100 });
       messages = Array.from(fetched.values()).reverse();
       logData.messages = messages.map(msg => ({
@@ -611,8 +651,10 @@ client.once('clientReady', async () => {
       new SlashCommandBuilder().setName('سيرفر').setDescription('عرض معلومات عن السيرفر'),
       new SlashCommandBuilder().setName('بينق').setDescription('عرض سرعة الاستجابة'),
       new SlashCommandBuilder().setName('قائمة_المتحكمين').setDescription('عرض قائمة المتحكمين'),
-      // تم تعديل أمر تغيير_اسم ليصبح بانل بدلاً من مودال مباشر
       new SlashCommandBuilder().setName('تغيير_اسم').setDescription('فتح لوحة تغيير الاسم'),
+      new SlashCommandBuilder().setName('رتب').setDescription('فتح لوحة الرتب (قائمة منسدلة)'),
+      new SlashCommandBuilder().setName('اضافة_رتبة').setDescription('إضافة رتبة إلى القائمة المنسدلة (للمتحكمين)').addRoleOption(opt => opt.setName('الرتبة').setDescription('الرتبة المطلوب إضافتها').setRequired(true)).addStringOption(opt => opt.setName('الايموجي').setDescription('إيموجي الرتبة (اختياري)').setRequired(false)).addStringOption(opt => opt.setName('الوصف').setDescription('وصف الرتبة (اختياري)').setRequired(false)),
+      new SlashCommandBuilder().setName('حذف_رتبة').setDescription('حذف رتبة من القائمة المنسدلة (للمتحكمين)').addRoleOption(opt => opt.setName('الرتبة').setDescription('الرتبة المطلوب حذفها').setRequired(true)),
       new SlashCommandBuilder().setName('بانل').setDescription('إنشاء لوحة التذاكر'),
       new SlashCommandBuilder().setName('عرض_تذكرة').setDescription('عرض إعدادات التذاكر'),
       new SlashCommandBuilder().setName('لوق_تذكرة').setDescription('إنشاء تقرير HTML للتذكرة الحالية'),
@@ -627,7 +669,6 @@ client.once('clientReady', async () => {
       new SlashCommandBuilder().setName('الاجازات_الحالية').setDescription('عرض الإجازات النشطة'),
       new SlashCommandBuilder().setName('سجل_الاجازات').setDescription('عرض سجل الإجازات'),
       new SlashCommandBuilder().setName('بانل_اقتراح').setDescription('إنشاء لوحة الاقتراحات'),
-      new SlashCommandBuilder().setName('رتب').setDescription('إنشاء لوحة رتب الإشعارات'),
       new SlashCommandBuilder().setName('تعيين').setDescription('إعدادات البوت (للمالك فقط)').addStringOption(opt => opt.setName('الخيار').setDescription('الخيار المطلوب').setRequired(true)).addStringOption(opt => opt.setName('القيمة').setDescription('القيمة الجديدة').setRequired(false)),
     ].map(cmd => cmd.toJSON());
 
@@ -810,7 +851,6 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
 // ============================================================
 
 client.on('messageCreate', async (message) => {
-  // تجاهل رسائل البوت والأوامر
   if (message.author.bot || !message.guild) return;
   if (message.content.startsWith('!')) return;
 
@@ -818,7 +858,7 @@ client.on('messageCreate', async (message) => {
   const userId = message.author.id;
   const config = await getGuildConfig(guildId);
 
-  // 🔹 نظام المستويات - يحسب في أي روم مع معالجة أخطاء وحفظ إجباري
+  // 🔹 نظام المستويات
   try {
     const user = await getUser(guildId, userId);
     user.messages += 1;
@@ -833,7 +873,6 @@ client.on('messageCreate', async (message) => {
       await user.save();
       console.log(`[LEVEL UP] ${message.author.tag} → المستوى ${user.level}`);
 
-      // إرسال إعلان المستوى الجديد في الروم المحدد فقط
       const levelChannelId = config.levelChannelId;
       if (levelChannelId) {
         const levelChannel = message.guild.channels.cache.get(levelChannelId);
@@ -849,7 +888,6 @@ client.on('messageCreate', async (message) => {
         }
       }
 
-      // منح رتبة المستوى إن وجدت
       const levelRole = await LevelRole.findOne({ guildId, level: user.level });
       if (levelRole) {
         const role = message.guild.roles.cache.get(levelRole.roleId);
@@ -859,7 +897,6 @@ client.on('messageCreate', async (message) => {
         }
       }
     } else {
-      // حفظ حتى لو لم يتغير المستوى (لضمان تحديث XP وعدد الرسائل)
       await user.save();
       console.log(`[XP] تم حفظ ${message.author.tag} - XP: ${user.xp}, المستوى: ${user.level}, الرسائل: ${user.messages}`);
     }
@@ -935,7 +972,9 @@ client.on('interactionCreate', async (interaction) => {
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false },
-          { name: '✏️ تغيير الاسم', value: '`!تغيير_اسم` – لوحة جميلة لتغيير اسمك', inline: false }
+          { name: '✏️ تغيير الاسم', value: '`!تغيير_اسم` – لوحة جميلة لتغيير اسمك', inline: false },
+          { name: '🔔 رتب الإشعارات', value: '`!رتب` – لوحة رتب منسدلة', inline: false },
+          { name: '➕ إدارة الرتب', value: '`!اضافة_رتبة @رتبة [ايموجي] [وصف]` – إضافة رتبة للقائمة\n`!حذف_رتبة @رتبة` – حذف رتبة من القائمة', inline: false }
         )
         .setFooter({ text: `🔥 البادئة: !` });
       const generalImage = getGeneralImage(interaction.guild, config);
@@ -1039,10 +1078,46 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ----- تغيير_اسم (الآن يرسل البانل بدلاً من المودال المباشر) -----
+    // ----- تغيير_اسم (بانل يبقى ثابت) -----
     if (commandName === 'تغيير_اسم') {
       await sendNameChangePanel(interaction.channel, config, guildId);
       await interaction.reply({ content: '✅ تم إنشاء لوحة تغيير الاسم.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // ----- رتب (بانل يبقى ثابت) -----
+    if (commandName === 'رتب') {
+      await sendRolesPanel(interaction.channel, config, guildId);
+      await interaction.reply({ content: '✅ تم إنشاء لوحة الرتب.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // ----- اضافة_رتبة (للمتحكمين) -----
+    if (commandName === 'اضافة_رتبة') {
+      if (!(await hasPermission(interaction.member, guildId))) {
+        return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
+      }
+      const role = interaction.options.getRole('الرتبة');
+      const emoji = interaction.options.getString('الايموجي') || '🔔';
+      const description = interaction.options.getString('الوصف') || '';
+      const added = await addRoleToList(guildId, role.id, role.name, emoji, description);
+      await logToChannel(guildId, { title: '➕ إضافة رتبة للقائمة', color: 0x2b2d31, description: `**${interaction.user}** أضاف رتبة **${role.name}** ${emoji}${description ? `\nالوصف: ${description}` : ''}` });
+      await interaction.reply({ content: added ? `✅ تم إضافة رتبة **${role.name}** إلى القائمة المنسدلة.` : `⚠️ رتبة **${role.name}** موجودة بالفعل. تم تحديث المعلومات.`, flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // ----- حذف_رتبة (للمتحكمين) -----
+    if (commandName === 'حذف_رتبة') {
+      if (!(await hasPermission(interaction.member, guildId))) {
+        return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
+      }
+      const role = interaction.options.getRole('الرتبة');
+      const removed = await removeRoleFromList(guildId, role.id);
+      if (!removed) {
+        return interaction.reply({ content: `⚠️ رتبة **${role.name}** غير موجودة في القائمة.`, flags: MessageFlags.Ephemeral });
+      }
+      await logToChannel(guildId, { title: '🗑️ حذف رتبة من القائمة', color: 0x2b2d31, description: `**${interaction.user}** حذف رتبة **${role.name}** من القائمة المنسدلة.` });
+      await interaction.reply({ content: `✅ تم حذف رتبة **${role.name}** من القائمة المنسدلة.`, flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -1417,26 +1492,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ----- رتب -----
-    if (commandName === 'رتب') {
-      if (!(await hasPermission(interaction.member, guildId))) {
-        return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
-      }
-      const defaultImage = 'https://i.imgur.com/7dXe7tM.png';
-      const imageUrl = config.rolesImage || defaultImage;
-      const embed = new EmbedBuilder().setTitle('🔔 رتب الإشعارات').setDescription('اختر الرتب التي تريد استلام إشعارات عنها من خلال الأزرار أدناه.').setColor(0x2b2d31).setImage(imageUrl).setFooter({ text: 'اضغط مرة للحصول على الرتبة، ومرة أخرى لإزالتها.' });
-      const generalImage = getGeneralImage(interaction.guild, config);
-      if (generalImage) embed.setThumbnail(generalImage);
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('role_game').setLabel('🎮 Game Notice').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('role_event').setLabel('📅 Event Notice').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('role_ajr').setLabel('🔊 Ajr Notice').setStyle(ButtonStyle.Secondary)
-      );
-      await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
-      await logToChannel(guildId, { title: '🔔 إنشاء لوحة رتب الإشعارات', color: 0x2b2d31, description: `**${interaction.user}** أنشأ لوحة رتب الإشعارات.` });
-      return;
-    }
-
     // ----- تعيين (للمالك فقط) -----
     if (commandName === 'تعيين') {
       if (interaction.user.id !== OWNER_ID) {
@@ -1465,7 +1520,8 @@ client.on('interactionCreate', async (interaction) => {
             { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة [السعر] [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '🖼️ بانل الإجازات', value: '`صورة_بانل_اجازات [رابط]`' },
             { name: '👤 رتبة البائع', value: '`رتبة_بائع @رتبة`' },
-            { name: '✏️ لوحة تغيير الاسم', value: '`عنوان_الاسم [نص]`، `وصف_الاسم [نص]`، `ملاحظة_الاسم [نص]`، `بanner_الاسم [رابط]`' }
+            { name: '✏️ لوحة تغيير الاسم', value: '`عنوان_الاسم [نص]`، `وصف_الاسم [نص]`، `ملاحظة_الاسم [نص]`، `بanner_الاسم [رابط]`' },
+            { name: '🔔 لوحة الرتب', value: '`عنوان_الرتب [نص]`، `وصف_الرتب [نص]`، `ملاحظة_الرتب [نص]`، `بanner_الرتب [رابط]`' }
           )
           .setFooter({ text: 'الصيغة: !تعيين [الخيار] [القيمة]' });
         const generalImage = getGeneralImage(interaction.guild, config);
@@ -1485,7 +1541,6 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     // ----- زر تغيير الاسم من اللوحة -----
     if (interaction.customId === 'change_name_ui') {
-      // التحقق من الكول داون قبل فتح المودال
       const userId = interaction.user.id;
       const last = await getNameCooldown(userId);
       if (last && Date.now() - last.getTime() < 5 * 60 * 60 * 1000) {
@@ -1620,12 +1675,10 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     // ============================================================
-    // ========== أزرار التذاكر - مقيدة فقط للمتحكمين ==========
+    // ========== أزرار التذاكر ==========
     // ============================================================
 
-    // زر استلام التذكرة - للمتحكمين فقط
     if (interaction.customId === 'claim_ticket') {
-      // التحقق من صلاحية المتحكم
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ 
           content: '❌ هذا الزر مخصص فقط للأعضاء الذين لديهم رتبة التحكم بالبوت.', 
@@ -1655,7 +1708,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // زر إزالة عضو - للمتحكمين فقط
     if (interaction.customId === 'remove_member_ticket') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ 
@@ -1685,7 +1737,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // زر إضافة عضو - للمتحكمين فقط
     if (interaction.customId === 'add_member_ticket') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ 
@@ -1715,14 +1766,12 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // زر إغلاق التذكرة - للمتحكمين أو المنشئ أو المستلم
     if (interaction.customId === 'close_ticket') {
       const log = await getTicketLogByChannel(interaction.channel.id);
       if (!log) {
         return interaction.reply({ content: '❌ هذه القناة ليست تذكرة مسجلة.', flags: MessageFlags.Ephemeral });
       }
 
-      // التحقق: متحكم أو منشئ التذكرة أو المستلم
       const isController = await hasPermission(interaction.member, guildId);
       const isClaimer = log.claimedBy === interaction.user.id;
       const isCreator = log.userId === interaction.user.id;
@@ -1815,7 +1864,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // 🔹 تعديل اسم التذكرة في إعادة الفتح إلى اسم المستخدم فقط
     if (interaction.customId.startsWith('restart_ticket_')) {
       const logId = interaction.customId.split('_')[2];
       const oldLog = await TicketLog.findById(logId);
@@ -1983,32 +2031,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ----- أزرار رتب الإشعارات -----
-    if (['role_game', 'role_event', 'role_ajr'].includes(interaction.customId)) {
-      const roleMap = {
-        'role_game': 'Game Notice',
-        'role_event': 'Event Notice',
-        'role_ajr': 'Ajr Notice'
-      };
-      const roleName = roleMap[interaction.customId];
-      let role = interaction.guild.roles.cache.find(r => r.name === roleName);
-      if (!role) {
-        role = await interaction.guild.roles.create({
-          name: roleName,
-          color: '#00ff00',
-          reason: 'تم إنشاء الرتبة عبر لوحة الإشعارات'
-        });
-      }
-      if (interaction.member.roles.cache.has(role.id)) {
-        await interaction.member.roles.remove(role);
-        await interaction.reply({ content: `❌ تم إزالة رتبة ${roleName}.`, flags: MessageFlags.Ephemeral });
-      } else {
-        await interaction.member.roles.add(role);
-        await interaction.reply({ content: `✅ تم إضافة رتبة ${roleName}.`, flags: MessageFlags.Ephemeral });
-      }
-      return;
-    }
-
     // ----- زر الاقتراحات -----
     if (interaction.customId === 'suggest_modal') {
       if (!config.suggestionsChannel) {
@@ -2134,8 +2156,6 @@ client.on('interactionCreate', async (interaction) => {
 
     // ----- مودال إضافة عضو -----
     if (interaction.customId === 'add_member_modal') {
-      // تأكد من أن المستخدم لديه صلاحية (تم التحقق من الزر نفسه)
-      // لكن نعيد التحقق للأمان
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ ليس لديك صلاحية لإضافة أعضاء.', flags: MessageFlags.Ephemeral });
       }
@@ -2174,7 +2194,6 @@ client.on('interactionCreate', async (interaction) => {
 
     // ----- مودال إزالة عضو -----
     if (interaction.customId === 'remove_member_modal') {
-      // تأكد من أن المستخدم لديه صلاحية (تم التحقق من الزر نفسه)
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ ليس لديك صلاحية لإزالة أعضاء.', flags: MessageFlags.Ephemeral });
       }
@@ -2342,7 +2361,7 @@ client.on('interactionCreate', async (interaction) => {
   // ============================================================
 
   if (interaction.isStringSelectMenu()) {
-    // ----- قائمة التذاكر 🔹 تعديل اسم التذكرة إلى اسم المستخدم فقط -----
+    // ----- قائمة التذاكر -----
     if (interaction.customId === 'ticket_menu') {
       const sectionName = interaction.values[0];
       const settings = await getTicketSettings(guildId);
@@ -2469,6 +2488,66 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: `✅ تم إرسال طلب شراء **${role.name}** إلى البائعين.`, flags: MessageFlags.Ephemeral });
       return;
     }
+
+    // ----- قائمة الرتب المنسدلة -----
+    if (interaction.customId === 'roles_dropdown') {
+      const selectedRoles = interaction.values;
+      const member = interaction.member;
+      
+      if (!selectedRoles || selectedRoles.length === 0) {
+        return interaction.reply({ content: '⚠️ لم تختر أي رتبة.', flags: MessageFlags.Ephemeral });
+      }
+
+      let added = [];
+      let removed = [];
+      
+      // جلب جميع الرتب من القاعدة
+      const allRoles = await RolesList.find({ guildId });
+      const allRoleIds = allRoles.map(r => r.roleId);
+      
+      // الرتب التي يملكها العضو حالياً من القائمة
+      const memberRoles = member.roles.cache;
+      const currentRoles = allRoleIds.filter(id => memberRoles.has(id));
+      
+      // الرتب المختارة
+      const selectedRoleIds = selectedRoles;
+      
+      // إضافة الرتب الجديدة
+      for (const roleId of selectedRoleIds) {
+        if (!currentRoles.includes(roleId)) {
+          const role = interaction.guild.roles.cache.get(roleId);
+          if (role) {
+            await member.roles.add(role);
+            added.push(role.name);
+          }
+        }
+      }
+      
+      // إزالة الرتب التي لم يتم اختيارها
+      for (const roleId of currentRoles) {
+        if (!selectedRoleIds.includes(roleId)) {
+          const role = interaction.guild.roles.cache.get(roleId);
+          if (role) {
+            await member.roles.remove(role);
+            removed.push(role.name);
+          }
+        }
+      }
+      
+      let replyMsg = '';
+      if (added.length > 0) {
+        replyMsg += `✅ تم إضافة الرتب: **${added.join('**, **')}**\n`;
+      }
+      if (removed.length > 0) {
+        replyMsg += `❌ تم إزالة الرتب: **${removed.join('**, **')}**\n`;
+      }
+      if (!added.length && !removed.length) {
+        replyMsg = 'ℹ️ لم تتغير أي رتبة.';
+      }
+      
+      await interaction.reply({ content: replyMsg, flags: MessageFlags.Ephemeral });
+      return;
+    }
   }
 });
 
@@ -2486,7 +2565,7 @@ function isAdminCommand(cmd) {
   return adminCmds.includes(cmd);
 }
 
-// ====== دالة مساعدة لإرسال لوحة تغيير الاسم ======
+// ====== دالة لإرسال لوحة تغيير الاسم (ثابتة، لا تُحذف) ======
 async function sendNameChangePanel(channel, config, guildId) {
   const botUser = client.user;
   const embed = new EmbedBuilder()
@@ -2512,6 +2591,56 @@ async function sendNameChangePanel(channel, config, guildId) {
   await channel.send({ embeds: [embed], components: [changeButton] });
 }
 
+// ====== دالة لإرسال لوحة الرتب (قائمة منسدلة، ثابتة، لا تُحذف) ======
+async function sendRolesPanel(channel, config, guildId) {
+  const botUser = client.user;
+  const roles = await RolesList.find({ guildId });
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x2b2d31)
+    .setAuthor({
+      name: botUser.username,
+      iconURL: botUser.displayAvatarURL(),
+    })
+    .setTitle(config.rolesTitle || '🔔 رتب الإشعارات')
+    .setDescription(config.rolesDescription || 'اختر الرتب التي تريد استلام إشعارات عنها من خلال القائمة المنسدلة أدناه.')
+    .setImage(config.rolesBanner || 'https://via.placeholder.com/800x240/1e1f22/5865f2?text=ROLES+BANNER')
+    .setFooter({ text: config.rolesNote || 'يمكنك اختيار رتبة أو أكثر.' })
+    .setTimestamp();
+
+  if (roles.length === 0) {
+    embed.setDescription('📭 لا توجد رتب مضافة في القائمة حالياً.\nاستخدم الأمر `!اضافة_رتبة @رتبة` لإضافة رتب.');
+    await channel.send({ embeds: [embed] });
+    return;
+  }
+
+  const options = roles.map(r => ({
+    label: r.roleName,
+    value: r.roleId,
+    description: r.description || `رتبة ${r.roleName}`,
+    emoji: r.emoji || '🔔',
+  }));
+
+  // تقسيم الخيارات إلى مجموعات (حد أقصى 25 لكل قائمة)
+  const chunkSize = 25;
+  const rows = [];
+  for (let i = 0; i < options.length; i += chunkSize) {
+    const chunk = options.slice(i, i + chunkSize);
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`roles_dropdown`)
+          .setPlaceholder(`اختر الرتب (${i+1}-${Math.min(i+chunkSize, options.length)})`)
+          .addOptions(chunk)
+          .setMinValues(0)
+          .setMaxValues(chunk.length)
+      )
+    );
+  }
+
+  await channel.send({ embeds: [embed], components: rows });
+}
+
 // ============================================================
 // ========== معالج الرسائل النصية ==========
 // ============================================================
@@ -2525,6 +2654,10 @@ client.on('messageCreate', async (message) => {
   const config = await getGuildConfig(guildId);
   const generalImage = getGeneralImage(message.guild, config);
 
+  // ====== الأوامر التي لا تُحذف (بانلات ثابتة) ======
+  const noDeleteCmds = ['تغيير_اسم', 'رتب'];
+
+  // ====== الأوامر الإدارية التي تُحذف بعد 5 ثواني ======
   const deleteDelay = isAdminCommand(cmd) ? 5000 : 0;
   let sentReply = null;
 
@@ -2558,7 +2691,6 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // أمر اختبار XP (تصحيح)
     if (cmd === 'اختبار_xp') {
       const user = await getUser(guildId, message.author.id);
       await message.reply(`📊 **بياناتك الحالية:**\n- المستوى: ${user.level}\n- XP: ${user.xp}/${(user.level + 1) * 100}\n- عدد الرسائل: ${user.messages}`);
@@ -2853,7 +2985,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // ============================================================
-    // == تعيين الإعدادات (مع إضافة إعدادات لوحة تغيير الاسم) ==
+    // == تعيين الإعدادات ==
     // ============================================================
 
     if (cmd === 'تعيين') {
@@ -2883,7 +3015,8 @@ client.on('messageCreate', async (message) => {
             { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة [السعر] [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '🖼️ بانل الإجازات', value: '`صورة_بانل_اجازات [رابط]`' },
             { name: '👤 رتبة البائع', value: '`رتبة_بائع @رتبة`' },
-            { name: '✏️ لوحة تغيير الاسم', value: '`عنوان_الاسم [نص]`، `وصف_الاسم [نص]`، `ملاحظة_الاسم [نص]`، `بanner_الاسم [رابط]`' }
+            { name: '✏️ لوحة تغيير الاسم', value: '`عنوان_الاسم [نص]`، `وصف_الاسم [نص]`، `ملاحظة_الاسم [نص]`، `بanner_الاسم [رابط]`' },
+            { name: '🔔 لوحة الرتب', value: '`عنوان_الرتب [نص]`، `وصف_الرتب [نص]`، `ملاحظة_الرتب [نص]`، `بanner_الرتب [رابط]`' }
           )
           .setFooter({ text: 'الصيغة: !تعيين [الخيار] [القيمة]' });
         if (generalImage) embed.setImage(generalImage);
@@ -2917,6 +3050,35 @@ client.on('messageCreate', async (message) => {
         if (!value) { await message.reply('⚠️ أدخل رابط الصورة.'); return; }
         await updateGuildConfig(guildId, { uiBannerUrl: value });
         await message.reply(`✅ تم تعيين صورة البانر: ${value}`);
+        return;
+      }
+
+      // ---- إعدادات لوحة الرتب ----
+      if (sub === 'عنوان_الرتب') {
+        if (!value) { await message.reply('⚠️ أدخل عنوان لوحة الرتب.'); return; }
+        await updateGuildConfig(guildId, { rolesTitle: value });
+        await message.reply(`✅ تم تعيين عنوان الرتب: ${value}`);
+        return;
+      }
+
+      if (sub === 'وصف_الرتب') {
+        if (!value) { await message.reply('⚠️ أدخل وصف لوحة الرتب.'); return; }
+        await updateGuildConfig(guildId, { rolesDescription: value });
+        await message.reply(`✅ تم تعيين وصف الرتب: ${value}`);
+        return;
+      }
+
+      if (sub === 'ملاحظة_الرتب') {
+        if (!value) { await message.reply('⚠️ أدخل نص الملاحظة.'); return; }
+        await updateGuildConfig(guildId, { rolesNote: value });
+        await message.reply(`✅ تم تعيين ملاحظة الرتب: ${value}`);
+        return;
+      }
+
+      if (sub === 'بanner_الرتب') {
+        if (!value) { await message.reply('⚠️ أدخل رابط الصورة.'); return; }
+        await updateGuildConfig(guildId, { rolesBanner: value });
+        await message.reply(`✅ تم تعيين صورة بانر الرتب: ${value}`);
         return;
       }
 
@@ -3382,7 +3544,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // ============================================================
-    // == الأوامر العامة ==
+    // == الأوامر العامة (لا تُحذف) ==
     // ============================================================
 
     if (cmd === 'مساعدة') {
@@ -3400,7 +3562,9 @@ client.on('messageCreate', async (message) => {
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false },
-          { name: '✏️ تغيير الاسم', value: '`!تغيير_اسم` – لوحة جميلة لتغيير اسمك', inline: false }
+          { name: '✏️ تغيير الاسم', value: '`!تغيير_اسم` – لوحة جميلة لتغيير اسمك (ثابتة)', inline: false },
+          { name: '🔔 رتب الإشعارات', value: '`!رتب` – لوحة رتب منسدلة (ثابتة)', inline: false },
+          { name: '➕ إدارة الرتب', value: '`!اضافة_رتبة @رتبة [ايموجي] [وصف]` – إضافة رتبة للقائمة\n`!حذف_رتبة @رتبة` – حذف رتبة من القائمة', inline: false }
         )
         .setFooter({ text: `🔥 البادئة: !` });
       if (generalImage) embed.setImage(generalImage);
@@ -3408,20 +3572,64 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // ====== أمر تغيير الاسم الجديد (يبعث البانل) ======
+    // ====== أمر تغيير الاسم (بانل ثابت، لا يُحذف) ======
     if (cmd === 'تغيير_اسم') {
       await sendNameChangePanel(message.channel, config, guildId);
       await message.reply('✅ تم إنشاء لوحة تغيير الاسم.');
       return;
     }
 
+    // ====== أمر الرتب (بانل ثابت، لا يُحذف) ======
+    if (cmd === 'رتب') {
+      await sendRolesPanel(message.channel, config, guildId);
+      await message.reply('✅ تم إنشاء لوحة الرتب.');
+      return;
+    }
+
+    // ====== إضافة رتبة (للمتحكمين) ======
+    if (cmd === 'اضافة_رتبة') {
+      if (!(await hasPermission(message.member, guildId))) {
+        return message.reply('❌ تحتاج صلاحية متحكم.');
+      }
+      const role = message.mentions.roles.first();
+      if (!role) {
+        return message.reply('⚠️ الصيغة: `!اضافة_رتبة @رتبة [ايموجي] [وصف]`');
+      }
+      const emoji = args[1] || '🔔';
+      const description = args.slice(2).join(' ');
+      const added = await addRoleToList(guildId, role.id, role.name, emoji, description);
+      await logToChannel(guildId, { title: '➕ إضافة رتبة للقائمة', color: 0x2b2d31, description: `**${message.author}** أضاف رتبة **${role.name}** ${emoji}${description ? `\nالوصف: ${description}` : ''}` });
+      await message.reply(added ? `✅ تم إضافة رتبة **${role.name}** إلى القائمة المنسدلة.` : `⚠️ رتبة **${role.name}** موجودة بالفعل. تم تحديث المعلومات.`);
+      return;
+    }
+
+    // ====== حذف رتبة (للمتحكمين) ======
+    if (cmd === 'حذف_رتبة') {
+      if (!(await hasPermission(message.member, guildId))) {
+        return message.reply('❌ تحتاج صلاحية متحكم.');
+      }
+      const role = message.mentions.roles.first();
+      if (!role) {
+        return message.reply('⚠️ الصيغة: `!حذف_رتبة @رتبة`');
+      }
+      const removed = await removeRoleFromList(guildId, role.id);
+      if (!removed) {
+        return message.reply(`⚠️ رتبة **${role.name}** غير موجودة في القائمة.`);
+      }
+      await logToChannel(guildId, { title: '🗑️ حذف رتبة من القائمة', color: 0x2b2d31, description: `**${message.author}** حذف رتبة **${role.name}** من القائمة المنسدلة.` });
+      await message.reply(`✅ تم حذف رتبة **${role.name}** من القائمة المنسدلة.`);
+      return;
+    }
+
+    // ====== الأوامر الإدارية (تُحذف بعد 5 ثواني) ======
     if (cmd === 'متحكم' || cmd === 'تعيين_متحكم') {
       if (message.author.id !== OWNER_ID) return message.reply('❌ هذا الأمر للمالك فقط.');
       const member = message.mentions.members.first();
       if (!member) return message.reply('⚠️ منشن العضو.');
       if (await isController(member.id, guildId)) return message.reply(`⚠️ ${member} متحكم بالفعل.`);
       await addController(guildId, member.id);
-      await message.reply(`✅ تم جعل ${member} متحكماً.`);
+      sentReply = await message.reply(`✅ تم جعل ${member} متحكماً.`);
+      deleteAfter(sentReply);
       return;
     }
 
@@ -3431,7 +3639,8 @@ client.on('messageCreate', async (message) => {
       if (!member) return message.reply('⚠️ منشن العضو.');
       if (!(await isController(member.id, guildId))) return message.reply(`⚠️ ${member} ليس متحكماً.`);
       await removeController(guildId, member.id);
-      await message.reply(`✅ تم إلغاء صلاحية التحكم عن ${member}.`);
+      sentReply = await message.reply(`✅ تم إلغاء صلاحية التحكم عن ${member}.`);
+      deleteAfter(sentReply);
       return;
     }
 
@@ -3445,7 +3654,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // ============================================================
-    // == أوامر الإشراف ==
+    // == أوامر الإشراف (تُحذف بعد 5 ثواني) ==
     // ============================================================
 
     if (cmd === 'حظر') {
@@ -4047,23 +4256,6 @@ client.on('messageCreate', async (message) => {
         );
       if (generalImage) embed.setImage(generalImage);
       await message.channel.send({ embeds: [embed] });
-      return;
-    }
-
-    if (cmd === 'رتب') {
-      if (!(await hasPermission(message.member, guildId))) { await message.reply('❌ تحتاج صلاحية متحكم.'); return; }
-      const defaultImage = 'https://i.imgur.com/7dXe7tM.png';
-      const imageUrl = config.rolesImage || defaultImage;
-      const embed = new EmbedBuilder().setTitle('🔔 رتب الإشعارات').setDescription('اختر الرتب التي تريد استلام إشعارات عنها من خلال الأزرار أدناه.').setColor(0x2b2d31).setImage(imageUrl).setFooter({ text: 'اضغط مرة للحصول على الرتبة، ومرة أخرى لإزالتها.' });
-      if (generalImage) embed.setThumbnail(generalImage);
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId('role_game').setLabel('🎮 Game Notice').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('role_event').setLabel('📅 Event Notice').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('role_ajr').setLabel('🔊 Ajr Notice').setStyle(ButtonStyle.Secondary)
-      );
-      await message.channel.send({ embeds: [embed], components: [row] });
-      await logToChannel(guildId, { title: '🔔 إنشاء لوحة رتب الإشعارات', color: 0x2b2d31, description: `**${message.author}** أنشأ لوحة رتب الإشعارات.` });
-      await message.reply('✅ تم إنشاء لوحة الرتب.');
       return;
     }
 
