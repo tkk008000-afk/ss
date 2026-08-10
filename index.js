@@ -960,124 +960,53 @@ async function sendRolesPanel(channel, config, guildId) {
 }
 
 // ============================================================
-// ========== دوال خريطة السيرفر (معدلة لدعم الإعدادات المخصصة) ==========
+// ========== دوال خريطة السيرفر (المعدلة) ==========
 // ============================================================
 
+/**
+ * توليد إمبيد خريطة السيرفر بناءً على الأقسام المحددة في MapConfig.
+ * إذا لم تكن هناك أقسام، تظهر رسالة "لا توجد أقسام محددة."
+ */
 async function generateServerMapEmbed(guild, member, config, mapConfig) {
-  // إذا كانت هناك إعدادات مخصصة، استخدمها
-  if (mapConfig && mapConfig.sections && mapConfig.sections.length > 0) {
-    const embed = new EmbedBuilder()
-      .setTitle(mapConfig.title || '🗺️ خريطة السيرفر')
-      .setDescription(mapConfig.description || 'هذه هي خريطة السيرفر مع الأقسام والقنوات.')
-      .setColor(0x2b2d31)
-      .setTimestamp()
-      .setFooter({ text: `عدد الأقسام: ${mapConfig.sections.length}` });
+  const embed = new EmbedBuilder()
+    .setTitle(mapConfig.title || '🗺️ خريطة السيرفر')
+    .setDescription(mapConfig.description || 'هذه هي خريطة السيرفر مع الأقسام والقنوات.')
+    .setColor(0x2b2d31)
+    .setTimestamp()
+    .setFooter({ text: `عدد الأقسام: ${mapConfig.sections?.length || 0}` });
 
-    if (mapConfig.banner) embed.setImage(mapConfig.banner);
-    else {
-      const generalImage = getGeneralImage(guild, config);
-      if (generalImage) embed.setImage(generalImage);
-    }
+  if (mapConfig.banner) embed.setImage(mapConfig.banner);
+  else {
+    const generalImage = getGeneralImage(guild, config);
+    if (generalImage) embed.setImage(generalImage);
+  }
 
-    let fieldCount = 0;
-    for (const section of mapConfig.sections) {
-      if (fieldCount >= 25) break;
-      const channels = section.channels || [];
-      let channelList = '';
-      let total = 0;
-      for (const chId of channels) {
-        const channel = guild.channels.cache.get(chId);
-        if (channel && channel.isTextBased()) {
-          channelList += `  #️⃣ ${channel.name}\n`;
-          total++;
-        } else if (channel && channel.type === ChannelType.GuildVoice) {
-          channelList += `  🔊 ${channel.name}\n`;
-          total++;
-        }
-        if (channelList.length > 1024) break;
-      }
-      if (total === 0) channelList = '(لا توجد قنوات)';
-      embed.addFields({ name: `📁 ${section.name}`, value: channelList, inline: false });
-      fieldCount++;
-    }
+  if (!mapConfig.sections || mapConfig.sections.length === 0) {
+    embed.addFields({ name: '📭', value: 'لا توجد أقسام محددة. استخدم زر "إضافة قسم" لإضافة قسم.', inline: false });
     return embed;
   }
 
-  // الطريقة التلقائية (في حال عدم وجود إعدادات مخصصة)
-  const isController = await hasPermission(member, guild.id);
-  const allChannels = guild.channels.cache;
-  const filteredChannels = allChannels.filter(channel => {
-    if (isController) return true;
-    const permissions = channel.permissionsFor(member);
-    return permissions && permissions.has(PermissionsBitField.Flags.ViewChannel);
-  });
-
-  const categories = filteredChannels.filter(c => c.type === ChannelType.GuildCategory).sort((a, b) => a.position - b.position);
-  const channelsWithoutCategory = filteredChannels.filter(c => c.type !== ChannelType.GuildCategory && !c.parentId).sort((a, b) => a.position - b.position);
-
-  const fields = [];
-  const MAX_FIELD_VALUE = 1024;
-
-  for (const [catId, category] of categories) {
-    const children = filteredChannels.filter(c => c.parentId === catId).sort((a, b) => a.position - b.position);
-    if (children.size === 0) {
-      fields.push({ name: `📁 ${category.name}`, value: '(فارغ)', inline: false });
-      continue;
-    }
-    let value = '';
-    for (const [chId, channel] of children) {
-      const emoji = channel.type === ChannelType.GuildText ? '#️⃣' : '🔊';
-      const line = `  ${emoji} ${channel.name}\n`;
-      if (value.length + line.length > MAX_FIELD_VALUE) {
-        fields.push({ name: `📁 ${category.name} (تابع)`, value: value, inline: false });
-        value = line;
-      } else {
-        value += line;
+  let fieldCount = 0;
+  for (const section of mapConfig.sections) {
+    if (fieldCount >= 25) break;
+    const channels = section.channels || [];
+    let channelList = '';
+    let total = 0;
+    for (const chId of channels) {
+      const channel = guild.channels.cache.get(chId);
+      if (channel && channel.isTextBased()) {
+        channelList += `  #️⃣ ${channel.name}\n`;
+        total++;
+      } else if (channel && channel.type === ChannelType.GuildVoice) {
+        channelList += `  🔊 ${channel.name}\n`;
+        total++;
       }
+      if (channelList.length > 1024) break;
     }
-    if (value) {
-      fields.push({ name: `📁 ${category.name}`, value: value, inline: false });
-    }
+    if (total === 0) channelList = '(لا توجد قنوات)';
+    embed.addFields({ name: `📁 ${section.name}`, value: channelList, inline: false });
+    fieldCount++;
   }
-
-  if (channelsWithoutCategory.size > 0) {
-    let value = '';
-    for (const [chId, channel] of channelsWithoutCategory) {
-      const emoji = channel.type === ChannelType.GuildText ? '#️⃣' : '🔊';
-      const line = `  ${emoji} ${channel.name}\n`;
-      if (value.length + line.length > MAX_FIELD_VALUE) {
-        fields.push({ name: '📁 قنوات عامة (تابع)', value: value, inline: false });
-        value = line;
-      } else {
-        value += line;
-      }
-    }
-    if (value) {
-      fields.push({ name: '📁 قنوات عامة', value: value, inline: false });
-    }
-  }
-
-  if (fields.length === 0) {
-    fields.push({ name: '📭', value: 'لا توجد قنوات أو أقسام متاحة لك.', inline: false });
-  }
-
-  const embed = new EmbedBuilder()
-    .setTitle(`🗺️ خريطة السيرفر: ${guild.name}`)
-    .setColor(0x2b2d31)
-    .setTimestamp()
-    .setFooter({ 
-      text: `عرض ${isController ? 'جميع القنوات' : 'القنوات العامة'} | عدد الأقسام: ${categories.size} | عدد القنوات المعروضة: ${filteredChannels.size}`
-    });
-
-  const maxFields = 25;
-  const fieldsToAdd = fields.slice(0, maxFields);
-  for (const field of fieldsToAdd) {
-    embed.addFields(field);
-  }
-
-  const generalImage = getGeneralImage(guild, config);
-  if (generalImage) embed.setImage(generalImage);
-
   return embed;
 }
 
@@ -1946,8 +1875,8 @@ client.on('interactionCreate', async (interaction) => {
           .setLabel('🔄 تحديث')
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
-          .setCustomId('map_set_sections')
-          .setLabel('⚙️ تعيين أقسام')
+          .setCustomId('map_add_section')
+          .setLabel('➕ إضافة قسم')
           .setStyle(ButtonStyle.Secondary)
       );
       await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
@@ -2143,7 +2072,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== قائمة اختيار القنوات عند تعيين أقسام الخريطة =====
+    // ===== قائمة اختيار القنوات عند إضافة قسم للخريطة =====
     if (interaction.customId === 'map_select_channels') {
       const selectedChannelIds = interaction.values;
       if (!tempMapData) tempMapData = {};
@@ -2153,6 +2082,7 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '⚠️ حدث خطأ، يرجى المحاولة مرة أخرى.', flags: MessageFlags.Ephemeral });
       }
       const mapConfig = await getMapConfig(guildId);
+      // التحقق من وجود قسم بنفس الاسم
       const existingIndex = mapConfig.sections.findIndex(s => s.name === sectionName);
       if (existingIndex !== -1) {
         mapConfig.sections[existingIndex].channels = selectedChannelIds;
@@ -2161,11 +2091,12 @@ client.on('interactionCreate', async (interaction) => {
       }
       await mapConfig.save();
       delete tempMapData[userKey];
-      await interaction.reply({ content: `✅ تم تعيين القسم **${sectionName}** مع ${selectedChannelIds.length} قناة.`, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `✅ تم إضافة القسم **${sectionName}** مع ${selectedChannelIds.length} قناة.`, flags: MessageFlags.Ephemeral });
+      // تحديث الخريطة المعروضة
       const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('map_set_sections').setLabel('⚙️ تعيين أقسام').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
       );
       await interaction.message.edit({ embeds: [embed], components: [row] }).catch(() => {});
       return;
@@ -2771,14 +2702,14 @@ client.on('interactionCreate', async (interaction) => {
       const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('map_set_sections').setLabel('⚙️ تعيين أقسام').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
       );
       await interaction.update({ embeds: [embed], components: [row] });
       return;
     }
 
-    // ===== زر تعيين أقسام الخريطة =====
-    if (interaction.customId === 'map_set_sections') {
+    // ===== زر إضافة قسم للخريطة =====
+    if (interaction.customId === 'map_add_section') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ ليس لديك صلاحية.', flags: MessageFlags.Ephemeral });
       }
@@ -3874,7 +3805,7 @@ client.on('messageCreate', async (message) => {
       const embed = await generateServerMapEmbed(message.guild, message.member, config, mapConfig);
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('refresh_map').setLabel('🔄 تحديث').setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId('map_set_sections').setLabel('⚙️ تعيين أقسام').setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId('map_add_section').setLabel('➕ إضافة قسم').setStyle(ButtonStyle.Secondary)
       );
       await message.channel.send({ embeds: [embed], components: [row] });
       await message.reply('✅ تم إنشاء خريطة السيرفر.');
