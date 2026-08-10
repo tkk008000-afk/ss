@@ -1,5 +1,5 @@
 // ============================================================
-// البوت المتكامل - النسخة النهائية مع سجلات التذاكر (HTML) + واجهة ديستورد
+// البوت المتكامل - النسخة النهائية مع واجهة تغيير الاسم المطورة
 // ============================================================
 
 const {
@@ -73,28 +73,11 @@ const ConfigSchema = new mongoose.Schema({
   promotionPoints: { type: Number, default: 100 },
   leavePanelImage: String,
   storePanelImage: String,
-  // ====== حقول واجهة ديستورد الجديدة ======
-  uiBotName: { type: String, default: 'TW Bot' },
-  uiAppBadge: { type: String, default: 'APP' },
-  uiWelcomeTitle: { type: String, default: 'Welcome To TEAM WOLF Community' },
-  uiWelcomeIcon: { type: String, default: '🐺' },
-  uiBullets: { type: [String], default: ['• مرحباً بكم في قسم التذاكر، يمكنكم اختيار القسم المناسب لطلب المساعدة.', '• سيتم إنشاء تذكرة خاصة بك وسيتواصل معك فريق الدعم.', '• يمكنك إرفاق الملفات والصور داخل التذكرة لتوضيح المشكلة.'] },
-  uiNote: { type: String, default: 'ملاحظة: بعد إنشاء التذكرة، سيتم إخطارك عبر الرسائل الخاصة.' },
-  uiUserMention: { type: String, default: '@TW S' },
-  uiMemberCount: { type: String, default: '3675' },
-  uiChannelLink: { type: String, default: '# 📜 | Rules' },
-  uiBannerImage: { type: String, default: 'https://via.placeholder.com/800x240/1e1f22/5865f2?text=+BANNER+PLACEHOLDER+' },
-  uiBannerLabels: { type: [String], default: ['NAME CHANGE', 'SERVER MAP', 'ALERTS ROLES'] },
-  uiButtonLabels: { type: [String], default: ['⚙️ Change', '🏠 Public Rooms', '🛠️ Support Rooms', '🎮 Gaming Rooms', '📋 Staff Rooms'] },
-  uiDropdownLabel: { type: String, default: 'اختر الرتبة' },
-  uiAvatarUrl: { type: String, default: 'https://cdn-icons-png.flaticon.com/512/616/616408.png' },
-  // حقول جديدة للواجهة المبسطة
-  uiUserName: { type: String, default: 'User' },
-  uiTitle: { type: String, default: 'عنوان الصندوق' },
-  uiDescription: { type: String, default: 'هذا هو وصف الصندوق، يمكنك تغييره كما تشاء.' },
-  uiNoteText: { type: String, default: 'هذه ملاحظة يمكن تعديلها.' },
+  // ====== حقول واجهة تغيير الاسم ======
+  uiTitle: { type: String, default: '✏️ تغيير الاسم' },
+  uiDescription: { type: String, default: 'اضغط على الزر أدناه لتغيير اسمك المستعار في السيرفر.' },
+  uiNoteText: { type: String, default: 'يمكنك تغيير اسمك مرة كل 5 ساعات.' },
   uiBannerUrl: { type: String, default: 'https://via.placeholder.com/800x240/1e1f22/5865f2?text=+BANNER+' },
-  uiAvatarImage: { type: String, default: 'https://cdn-icons-png.flaticon.com/512/616/616408.png' },
 }, { timestamps: true });
 const Config = mongoose.model('Config', ConfigSchema);
 
@@ -628,7 +611,8 @@ client.once('clientReady', async () => {
       new SlashCommandBuilder().setName('سيرفر').setDescription('عرض معلومات عن السيرفر'),
       new SlashCommandBuilder().setName('بينق').setDescription('عرض سرعة الاستجابة'),
       new SlashCommandBuilder().setName('قائمة_المتحكمين').setDescription('عرض قائمة المتحكمين'),
-      new SlashCommandBuilder().setName('تغيير_اسم').setDescription('تغيير اسمك المستعار في السيرفر'),
+      // تم تعديل أمر تغيير_اسم ليصبح بانل بدلاً من مودال مباشر
+      new SlashCommandBuilder().setName('تغيير_اسم').setDescription('فتح لوحة تغيير الاسم'),
       new SlashCommandBuilder().setName('بانل').setDescription('إنشاء لوحة التذاكر'),
       new SlashCommandBuilder().setName('عرض_تذكرة').setDescription('عرض إعدادات التذاكر'),
       new SlashCommandBuilder().setName('لوق_تذكرة').setDescription('إنشاء تقرير HTML للتذكرة الحالية'),
@@ -645,8 +629,6 @@ client.once('clientReady', async () => {
       new SlashCommandBuilder().setName('بانل_اقتراح').setDescription('إنشاء لوحة الاقتراحات'),
       new SlashCommandBuilder().setName('رتب').setDescription('إنشاء لوحة رتب الإشعارات'),
       new SlashCommandBuilder().setName('تعيين').setDescription('إعدادات البوت (للمالك فقط)').addStringOption(opt => opt.setName('الخيار').setDescription('الخيار المطلوب').setRequired(true)).addStringOption(opt => opt.setName('القيمة').setDescription('القيمة الجديدة').setRequired(false)),
-      // ====== أمر سلاش جديد لواجهة ديستورد المبسطة ======
-      new SlashCommandBuilder().setName('بانل_ديستورد').setDescription('إنشاء لوحة الواجهة الرئيسية بنمط ديستورد (للمتحكمين)'),
     ].map(cmd => cmd.toJSON());
 
     const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -953,7 +935,7 @@ client.on('interactionCreate', async (interaction) => {
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false },
-          { name: '🆕 واجهة ديستورد', value: '`!بانل_ديستورد` (للمتحكمين) – لوحة رئيسية بتصميم احترافي', inline: false }
+          { name: '✏️ تغيير الاسم', value: '`!تغيير_اسم` – لوحة جميلة لتغيير اسمك', inline: false }
         )
         .setFooter({ text: `🔥 البادئة: !` });
       const generalImage = getGeneralImage(interaction.guild, config);
@@ -1057,19 +1039,10 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ----- تغيير_اسم -----
+    // ----- تغيير_اسم (الآن يرسل البانل بدلاً من المودال المباشر) -----
     if (commandName === 'تغيير_اسم') {
-      const userId = interaction.user.id;
-      const last = await getNameCooldown(userId);
-      if (last && Date.now() - last.getTime() < 5 * 60 * 60 * 1000) {
-        const remaining = Math.ceil((5 * 60 * 60 * 1000 - (Date.now() - last.getTime())) / (60 * 60 * 1000));
-        return interaction.reply({ content: `⏳ يمكنك تغيير اسمك بعد ${remaining} ساعة.`, flags: MessageFlags.Ephemeral });
-      }
-      const embed = new EmbedBuilder().setTitle('✏️ تغيير الاسم').setDescription('اضغط على الزر أدناه لتغيير اسمك المستعار في السيرفر.').setColor(0x2b2d31).setFooter({ text: 'يمكنك تغيير اسمك مرة كل 5 ساعات.' });
-      const generalImage = getGeneralImage(interaction.guild, config);
-      if (generalImage) embed.setImage(generalImage);
-      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_name_modal').setLabel('✏️ تغيير الاسم').setStyle(ButtonStyle.Secondary));
-      await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+      await sendNameChangePanel(interaction.channel, config, guildId);
+      await interaction.reply({ content: '✅ تم إنشاء لوحة تغيير الاسم.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -1492,8 +1465,7 @@ client.on('interactionCreate', async (interaction) => {
             { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة [السعر] [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '🖼️ بانل الإجازات', value: '`صورة_بانل_اجازات [رابط]`' },
             { name: '👤 رتبة البائع', value: '`رتبة_بائع @رتبة`' },
-            // ====== إعدادات واجهة ديستورد الجديدة ======
-            { name: '🆕 واجهة ديستورد', value: '`اسم_المستخدم [نص]`، `عنوان_الصندوق [نص]`، `وصف_الصندوق [نص]`، `نص_الملاحظة [نص]`، `صورة_الافاتار [رابط]`، `صورة_البانر [رابط]`', inline: false }
+            { name: '✏️ لوحة تغيير الاسم', value: '`عنوان_الاسم [نص]`، `وصف_الاسم [نص]`، `ملاحظة_الاسم [نص]`، `بanner_الاسم [رابط]`' }
           )
           .setFooter({ text: 'الصيغة: !تعيين [الخيار] [القيمة]' });
         const generalImage = getGeneralImage(interaction.guild, config);
@@ -1504,16 +1476,6 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: '⚠️ استخدم الأمر النصي `!تعيين` لإدارة الإعدادات.', flags: MessageFlags.Ephemeral });
       return;
     }
-
-    // ====== أمر بانل_ديستورد الجديد ======
-    if (commandName === 'بانل_ديستورد') {
-      if (!(await hasPermission(interaction.member, guildId))) {
-        return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
-      }
-      await sendDiscordUI(interaction.channel, config, guildId);
-      await interaction.reply({ content: '✅ تم إنشاء لوحة الواجهة الرئيسية.', flags: MessageFlags.Ephemeral });
-      return;
-    }
   }
 
   // ============================================================
@@ -1521,6 +1483,33 @@ client.on('interactionCreate', async (interaction) => {
   // ============================================================
 
   if (interaction.isButton()) {
+    // ----- زر تغيير الاسم من اللوحة -----
+    if (interaction.customId === 'change_name_ui') {
+      // التحقق من الكول داون قبل فتح المودال
+      const userId = interaction.user.id;
+      const last = await getNameCooldown(userId);
+      if (last && Date.now() - last.getTime() < 5 * 60 * 60 * 1000) {
+        const remaining = Math.ceil((5 * 60 * 60 * 1000 - (Date.now() - last.getTime())) / (60 * 60 * 1000));
+        return interaction.reply({ content: `⏳ يمكنك تغيير اسمك بعد ${remaining} ساعة.`, flags: MessageFlags.Ephemeral });
+      }
+      const modal = new ModalBuilder()
+        .setCustomId('change_name_modal')
+        .setTitle('✏️ تغيير الاسم')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('new_name')
+              .setLabel('الاسم الجديد')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setMinLength(2)
+              .setMaxLength(32)
+          )
+        );
+      await interaction.showModal(modal);
+      return;
+    }
+
     // ----- أزرار لوحة الإجازات -----
     if (interaction.customId.startsWith('leave_panel_')) {
       if (!config.leaveManagerRole || !interaction.member.roles.cache.has(config.leaveManagerRole)) {
@@ -2020,26 +2009,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ----- زر تغيير الاسم -----
-    if (interaction.customId === 'open_name_modal') {
-      const modal = new ModalBuilder()
-        .setCustomId('change_name_modal')
-        .setTitle('✏️ تغيير الاسم')
-        .addComponents(
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder()
-              .setCustomId('new_name')
-              .setLabel('الاسم الجديد')
-              .setStyle(TextInputStyle.Short)
-              .setRequired(true)
-              .setMinLength(2)
-              .setMaxLength(32)
-          )
-        );
-      await interaction.showModal(modal);
-      return;
-    }
-
     // ----- زر الاقتراحات -----
     if (interaction.customId === 'suggest_modal') {
       if (!config.suggestionsChannel) {
@@ -2069,6 +2038,19 @@ client.on('interactionCreate', async (interaction) => {
   // ============================================================
 
   if (interaction.isModalSubmit()) {
+    // ----- مودال تغيير الاسم -----
+    if (interaction.customId === 'change_name_modal') {
+      const newName = interaction.fields.getTextInputValue('new_name');
+      try {
+        await interaction.member.setNickname(newName);
+        await setNameCooldown(interaction.user.id);
+        await interaction.reply({ content: `✅ تم تغيير اسمك إلى **${newName}**.`, flags: MessageFlags.Ephemeral });
+      } catch (error) {
+        await interaction.reply({ content: '❌ لا يمكن تغيير الاسم. قد لا تملك الصلاحية.', flags: MessageFlags.Ephemeral });
+      }
+      return;
+    }
+
     // ----- مودال طلب الإجازة -----
     if (interaction.customId === 'leave_modal') {
       const reason = interaction.fields.getTextInputValue('leave_reason');
@@ -2321,19 +2303,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ----- مودال تغيير الاسم -----
-    if (interaction.customId === 'change_name_modal') {
-      const newName = interaction.fields.getTextInputValue('new_name');
-      try {
-        await interaction.member.setNickname(newName);
-        await setNameCooldown(interaction.user.id);
-        await interaction.reply({ content: `✅ تم تغيير اسمك إلى **${newName}**.`, flags: MessageFlags.Ephemeral });
-      } catch (error) {
-        await interaction.reply({ content: '❌ لا يمكن تغيير الاسم. قد لا تملك الصلاحية.', flags: MessageFlags.Ephemeral });
-      }
-      return;
-    }
-
     // ----- مودال تقديم اقتراح -----
     if (interaction.customId === 'suggest_submit') {
       const text = interaction.fields.getTextInputValue('suggest_text');
@@ -2517,22 +2486,21 @@ function isAdminCommand(cmd) {
   return adminCmds.includes(cmd);
 }
 
-// ====== دالة مساعدة لإرسال واجهة ديستورد (المبسطة) ======
-async function sendDiscordUI(channel, config, guildId) {
-  // إنشاء Embed بسيط
+// ====== دالة مساعدة لإرسال لوحة تغيير الاسم ======
+async function sendNameChangePanel(channel, config, guildId) {
+  const botUser = client.user;
   const embed = new EmbedBuilder()
     .setColor(0x2b2d31)
     .setAuthor({
-      name: config.uiUserName || 'User',
-      iconURL: config.uiAvatarImage || 'https://cdn-icons-png.flaticon.com/512/616/616408.png',
+      name: botUser.username,
+      iconURL: botUser.displayAvatarURL(),
     })
-    .setTitle(config.uiTitle || 'عنوان الصندوق')
-    .setDescription(config.uiDescription || 'هذا هو وصف الصندوق، يمكنك تغييره كما تشاء.')
+    .setTitle(config.uiTitle || '✏️ تغيير الاسم')
+    .setDescription(config.uiDescription || 'اضغط على الزر أدناه لتغيير اسمك المستعار في السيرفر.')
     .setImage(config.uiBannerUrl || 'https://via.placeholder.com/800x240/1e1f22/5865f2?text=+BANNER+')
-    .setFooter({ text: config.uiNoteText || 'هذه ملاحظة يمكن تعديلها.' })
+    .setFooter({ text: config.uiNoteText || 'يمكنك تغيير اسمك مرة كل 5 ساعات.' })
     .setTimestamp();
 
-  // زر Change (لتغيير الاسم)
   const changeButton = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('change_name_ui')
@@ -2885,7 +2853,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // ============================================================
-    // == تعيين الإعدادات (مع إضافة إعدادات الواجهة الجديدة) ==
+    // == تعيين الإعدادات (مع إضافة إعدادات لوحة تغيير الاسم) ==
     // ============================================================
 
     if (cmd === 'تعيين') {
@@ -2915,8 +2883,7 @@ client.on('messageCreate', async (message) => {
             { name: '🛒 المتجر', value: '`اضافة_منتج @رتبة [السعر] [الوصف]`، `حذف_منتج [معرف]`، `صورة_المتجر [رابط]`، `قناة_المتجر #قناة`' },
             { name: '🖼️ بانل الإجازات', value: '`صورة_بانل_اجازات [رابط]`' },
             { name: '👤 رتبة البائع', value: '`رتبة_بائع @رتبة`' },
-            // ====== إعدادات واجهة ديستورد الجديدة ======
-            { name: '🆕 واجهة ديستورد', value: '`اسم_المستخدم [نص]`، `عنوان_الصندوق [نص]`، `وصف_الصندوق [نص]`، `نص_الملاحظة [نص]`، `صورة_الافاتار [رابط]`، `صورة_البانر [رابط]`', inline: false }
+            { name: '✏️ لوحة تغيير الاسم', value: '`عنوان_الاسم [نص]`، `وصف_الاسم [نص]`، `ملاحظة_الاسم [نص]`، `بanner_الاسم [رابط]`' }
           )
           .setFooter({ text: 'الصيغة: !تعيين [الخيار] [القيمة]' });
         if (generalImage) embed.setImage(generalImage);
@@ -2924,43 +2891,29 @@ client.on('messageCreate', async (message) => {
         return;
       }
 
-      // ---- إعدادات واجهة ديستورد الجديدة ----
-      if (sub === 'اسم_المستخدم') {
-        if (!value) { await message.reply('⚠️ أدخل اسم المستخدم.'); return; }
-        await updateGuildConfig(guildId, { uiUserName: value });
-        await message.reply(`✅ تم تعيين اسم المستخدم: ${value}`);
-        return;
-      }
-
-      if (sub === 'عنوان_الصندوق') {
-        if (!value) { await message.reply('⚠️ أدخل عنوان الصندوق.'); return; }
+      // ---- إعدادات لوحة تغيير الاسم ----
+      if (sub === 'عنوان_الاسم') {
+        if (!value) { await message.reply('⚠️ أدخل عنوان اللوحة.'); return; }
         await updateGuildConfig(guildId, { uiTitle: value });
-        await message.reply(`✅ تم تعيين عنوان الصندوق: ${value}`);
+        await message.reply(`✅ تم تعيين عنوان اللوحة: ${value}`);
         return;
       }
 
-      if (sub === 'وصف_الصندوق') {
-        if (!value) { await message.reply('⚠️ أدخل وصف الصندوق.'); return; }
+      if (sub === 'وصف_الاسم') {
+        if (!value) { await message.reply('⚠️ أدخل وصف اللوحة.'); return; }
         await updateGuildConfig(guildId, { uiDescription: value });
-        await message.reply(`✅ تم تعيين وصف الصندوق: ${value}`);
+        await message.reply(`✅ تم تعيين وصف اللوحة: ${value}`);
         return;
       }
 
-      if (sub === 'نص_الملاحظة') {
+      if (sub === 'ملاحظة_الاسم') {
         if (!value) { await message.reply('⚠️ أدخل نص الملاحظة.'); return; }
         await updateGuildConfig(guildId, { uiNoteText: value });
         await message.reply(`✅ تم تعيين نص الملاحظة: ${value}`);
         return;
       }
 
-      if (sub === 'صورة_الافاتار') {
-        if (!value) { await message.reply('⚠️ أدخل رابط الصورة.'); return; }
-        await updateGuildConfig(guildId, { uiAvatarImage: value });
-        await message.reply(`✅ تم تعيين صورة الأفاتار: ${value}`);
-        return;
-      }
-
-      if (sub === 'صورة_البانر') {
+      if (sub === 'بanner_الاسم') {
         if (!value) { await message.reply('⚠️ أدخل رابط الصورة.'); return; }
         await updateGuildConfig(guildId, { uiBannerUrl: value });
         await message.reply(`✅ تم تعيين صورة البانر: ${value}`);
@@ -3447,7 +3400,7 @@ client.on('messageCreate', async (message) => {
           { name: '💡 الاقتراحات', value: '`!بانل_اقتراح`', inline: false },
           { name: '🛡️ الإدارة', value: 'حظر، طرد، كتم، تحذير، مسح، قفل، فتح، نقل_كل، طرد_صوتي، كتم_صوتي، فك_كتم_صوتي، إدارة الرتب، القنوات', inline: false },
           { name: '⚙️ الإعدادات', value: '`!تعيين` (للمالك فقط)', inline: false },
-          { name: '🆕 واجهة ديستورد', value: '`!بانل_ديستورد` (للمتحكمين) – لوحة رئيسية بتصميم احترافي', inline: false }
+          { name: '✏️ تغيير الاسم', value: '`!تغيير_اسم` – لوحة جميلة لتغيير اسمك', inline: false }
         )
         .setFooter({ text: `🔥 البادئة: !` });
       if (generalImage) embed.setImage(generalImage);
@@ -3455,13 +3408,10 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // ====== أمر بانل_ديستورد النصي ======
-    if (cmd === 'بانل_ديستورد') {
-      if (!(await hasPermission(message.member, guildId))) {
-        return message.reply('❌ تحتاج صلاحية متحكم.');
-      }
-      await sendDiscordUI(message.channel, config, guildId);
-      await message.reply('✅ تم إنشاء لوحة الواجهة الرئيسية.');
+    // ====== أمر تغيير الاسم الجديد (يبعث البانل) ======
+    if (cmd === 'تغيير_اسم') {
+      await sendNameChangePanel(message.channel, config, guildId);
+      await message.reply('✅ تم إنشاء لوحة تغيير الاسم.');
       return;
     }
 
@@ -4114,25 +4064,6 @@ client.on('messageCreate', async (message) => {
       await message.channel.send({ embeds: [embed], components: [row] });
       await logToChannel(guildId, { title: '🔔 إنشاء لوحة رتب الإشعارات', color: 0x2b2d31, description: `**${message.author}** أنشأ لوحة رتب الإشعارات.` });
       await message.reply('✅ تم إنشاء لوحة الرتب.');
-      return;
-    }
-
-    // ============================================================
-    // == تغيير الاسم ==
-    // ============================================================
-
-    if (cmd === 'تغيير_اسم') {
-      const userId = message.author.id;
-      const last = await getNameCooldown(userId);
-      if (last && Date.now() - last.getTime() < 5 * 60 * 60 * 1000) {
-        const remaining = Math.ceil((5 * 60 * 60 * 1000 - (Date.now() - last.getTime())) / (60 * 60 * 1000));
-        await message.reply(`⏳ يمكنك تغيير اسمك بعد ${remaining} ساعة.`);
-        return;
-      }
-      const embed = new EmbedBuilder().setTitle('✏️ تغيير الاسم').setDescription('اضغط على الزر أدناه لتغيير اسمك المستعار في السيرفر.').setColor(0x2b2d31).setFooter({ text: 'يمكنك تغيير اسمك مرة كل 5 ساعات.' });
-      if (generalImage) embed.setImage(generalImage);
-      const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('open_name_modal').setLabel('✏️ تغيير الاسم').setStyle(ButtonStyle.Secondary));
-      await message.channel.send({ embeds: [embed], components: [row] });
       return;
     }
 
