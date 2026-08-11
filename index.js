@@ -986,12 +986,13 @@ async function generateServerMapEmbed(guild, member, config, mapConfig) {
 
 /**
  * بناء أزرار الخريطة (تظهر فقط إذا كان هناك أقسام، وإلا يظهر زر الإضافة فقط)
+ * تم إضافة زر "🗑️ حذف قسم"
  */
 function buildMapButtons(mapConfig) {
   const rows = [];
   const sections = mapConfig.sections || [];
 
-  // صف التحكم (تحديث + إضافة)
+  // صف التحكم (تحديث + إضافة + حذف)
   const controlRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('refresh_map')
@@ -1000,6 +1001,10 @@ function buildMapButtons(mapConfig) {
     new ButtonBuilder()
       .setCustomId('map_add_section')
       .setLabel('➕ إضافة قسم')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('map_delete_section')
+      .setLabel('🗑️ حذف قسم')
       .setStyle(ButtonStyle.Secondary)
   );
   rows.push(controlRow);
@@ -2117,6 +2122,28 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ===== زر حذف قسم الخريطة =====
+    if (interaction.customId === 'map_delete_section') {
+      if (!(await hasPermission(interaction.member, guildId))) {
+        return interaction.reply({ content: '❌ ليس لديك صلاحية.', flags: MessageFlags.Ephemeral });
+      }
+      const modal = new ModalBuilder()
+        .setCustomId('delete_section_modal')
+        .setTitle('🗑️ حذف قسم')
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId('section_name_to_delete')
+              .setLabel('أدخل اسم القسم المراد حذفه')
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setPlaceholder('مثال: عام')
+          )
+        );
+      await interaction.showModal(modal);
+      return;
+    }
+
     if (interaction.customId === 'change_name_ui') {
       const userId = interaction.user.id;
       const last = await getNameCooldown(userId);
@@ -2997,7 +3024,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== مودال إضافة قسم الخريطة (جديد) =====
+    // ===== مودال إضافة قسم الخريطة =====
     if (interaction.customId === 'map_section_modal') {
       const sectionName = interaction.fields.getTextInputValue('map_section_name');
       const channelsInput = interaction.fields.getTextInputValue('map_channels_ids');
@@ -3041,7 +3068,36 @@ client.on('interactionCreate', async (interaction) => {
 
       await interaction.reply({ content: replyMsg, flags: MessageFlags.Ephemeral });
 
-      // تحديث الخريطة المعروضة (نقوم بتحديث الرسالة الأصلية إن وجدت)
+      // تحديث الخريطة المعروضة
+      try {
+        const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
+        const components = buildMapButtons(mapConfig);
+        await interaction.message?.edit({ embeds: [embed], components }).catch(() => {});
+      } catch (e) {
+        // إذا لم تكن هناك رسالة أصلية، نتجاهل
+      }
+      return;
+    }
+
+    // ===== مودال حذف قسم الخريطة (جديد) =====
+    if (interaction.customId === 'delete_section_modal') {
+      const sectionName = interaction.fields.getTextInputValue('section_name_to_delete').trim();
+      if (!sectionName) {
+        return interaction.reply({ content: '⚠️ يرجى إدخال اسم القسم.', flags: MessageFlags.Ephemeral });
+      }
+
+      const mapConfig = await getMapConfig(guildId);
+      const sectionIndex = mapConfig.sections.findIndex(s => s.name.toLowerCase() === sectionName.toLowerCase());
+      if (sectionIndex === -1) {
+        return interaction.reply({ content: `❌ القسم **${sectionName}** غير موجود.`, flags: MessageFlags.Ephemeral });
+      }
+
+      mapConfig.sections.splice(sectionIndex, 1);
+      await mapConfig.save();
+
+      await interaction.reply({ content: `✅ تم حذف القسم **${sectionName}** بنجاح.`, flags: MessageFlags.Ephemeral });
+
+      // تحديث الخريطة المعروضة
       try {
         const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
         const components = buildMapButtons(mapConfig);
