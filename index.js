@@ -2376,11 +2376,14 @@ client.on('interactionCreate', async (interaction) => {
           { name: '📌 الحالة', value: '🔴 مغلقة', inline: true },
           { name: '📥 استلمها', value: claimedBy ? claimedBy.toString() : 'لم تستلم', inline: true },
           { name: '👥 الأعضاء المضافين', value: addedMembersMentions, inline: false },
-          { name: '⏱️ وقت الإغلاق', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
+          { name: '⏱️ وقت الإغلاق', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+          // الحقل الجديد: من أغلق التذكرة
+          { name: '🔒 أغلقها', value: interaction.user.toString(), inline: true }
         )
         .setTimestamp();
       const replyData = {
-        content: `🔒 تم إغلاق التذكرة.${generationFailed ? ' ⚠️ حدث خطأ أثناء توليد ملف HTML، لكن التقرير النصي موجود أدناه.' : ''}`,
+        // تعديل الرسالة لتشمل اسم المحكم
+        content: `🔒 تم إغلاق التذكرة بواسطة ${interaction.user}.${generationFailed ? ' ⚠️ حدث خطأ أثناء توليد ملف HTML، لكن التقرير النصي موجود أدناه.' : ''}`,
         embeds: [embed]
       };
       if (htmlBuffer) {
@@ -2403,7 +2406,7 @@ client.on('interactionCreate', async (interaction) => {
         try {
           const dmEmbed = new EmbedBuilder()
             .setTitle('📋 تقرير تذكرتك المغلقة')
-            .setDescription(`تم إغلاق تذكرتك \`${interaction.channel.name}\` في **${interaction.guild.name}**`)
+            .setDescription(`تم إغلاق تذكرتك \`${interaction.channel.name}\` في **${interaction.guild.name}** بواسطة ${interaction.user}`)
             .setColor(0x2b2d31)
             .setTimestamp();
           const dmData = { embeds: [dmEmbed] };
@@ -3478,6 +3481,119 @@ client.on('messageCreate', async (message) => {
       } else {
         await message.reply(`⚠️ الأمر الفرعي "${subCmd}" غير معروف. استخدم \`!تعيين\` لعرض القائمة.`);
       }
+      return;
+    }
+
+    // ===== أمر تذكرة (إدارة الأقسام) =====
+    if (cmd === 'تذكرة') {
+      if (!(await hasPermission(message.member, guildId))) {
+        return message.reply('❌ تحتاج صلاحية متحكم.');
+      }
+      const subCmd = args[0]?.toLowerCase();
+      const rest = args.slice(1).join(' ');
+      
+      if (!subCmd) {
+        // عرض التعليمات
+        const embed = new EmbedBuilder()
+          .setTitle('🎫 إدارة التذاكر')
+          .setColor(0x2b2d31)
+          .setDescription(`
+            **الأوامر المتاحة:**
+            \`!تذكرة إضافة [الاسم] @دور :ايموجي: [قابل_لإعادة]\` - إضافة قسم جديد (قابل_لإعادة: true/false)
+            \`!تذكرة حذف [الاسم]\` - حذف قسم
+            \`!تذكرة تعيين_ايموجي [الاسم] :ايموجي:\` - تغيير إيموجي القسم
+            \`!تذكرة نص [النص]\` - تغيير نص لوحة التذاكر
+            \`!تذكرة صورة [رابط]\` - تغيير صورة لوحة التذاكر
+          `)
+          .setTimestamp();
+        if (generalImage) embed.setImage(generalImage);
+        await message.channel.send({ embeds: [embed] });
+        return;
+      }
+
+      const settings = await getTicketSettings(guildId);
+
+      if (subCmd === 'إضافة') {
+        // تنسيق: !تذكرة إضافة [الاسم] @دور :ايموجي: [قابل_لإعادة]
+        const parts = rest.match(/(.+?)\s+<@&(\d+)>\s*(:[\w]+:)?\s*(true|false)?/);
+        if (!parts) {
+          return message.reply('⚠️ الصيغة: `!تذكرة إضافة [الاسم] @دور :ايموجي: [true/false]`\nمثال: `!تذكرة إضافة الدعم الفني @Support :🛠: true`');
+        }
+        const name = parts[1].trim();
+        const roleId = parts[2];
+        const emoji = parts[3] || '📌';
+        const canRestart = parts[4] === 'true' ? true : false;
+
+        // التحقق من وجود الدور
+        const role = message.guild.roles.cache.get(roleId);
+        if (!role) return message.reply('❌ الدور غير موجود.');
+
+        // التحقق من عدم وجود اسم مكرر
+        if (settings.sections.some(s => s.name === name)) {
+          return message.reply(`⚠️ قسم باسم "${name}" موجود بالفعل.`);
+        }
+
+        settings.sections.push({ name, roleId, emoji, canRestart });
+        await settings.save();
+        await message.reply(`✅ تم إضافة قسم **${name}** مع دور ${role} ${emoji} ${canRestart ? '(قابل لإعادة الفتح)' : ''}`);
+        await logToChannel(guildId, {
+          title: '🎫 إضافة قسم تذكرة',
+          color: 0x2b2d31,
+          description: `**المضيف:** ${message.author}\n**الاسم:** ${name}\n**الدور:** ${role.name}\n**الإيموجي:** ${emoji}\n**إعادة فتح:** ${canRestart}`
+        });
+        return;
+      }
+
+      if (subCmd === 'حذف') {
+        const name = args.slice(1).join(' ');
+        if (!name) return message.reply('⚠️ أدخل اسم القسم.');
+        const idx = settings.sections.findIndex(s => s.name === name);
+        if (idx === -1) return message.reply(`⚠️ لا يوجد قسم باسم "${name}".`);
+        settings.sections.splice(idx, 1);
+        await settings.save();
+        await message.reply(`✅ تم حذف القسم **${name}**.`);
+        await logToChannel(guildId, {
+          title: '🎫 حذف قسم تذكرة',
+          color: 0x2b2d31,
+          description: `**المضيف:** ${message.author}\n**الاسم:** ${name}`
+        });
+        return;
+      }
+
+      if (subCmd === 'تعيين_ايموجي') {
+        const parts = rest.match(/(.+?)\s+(:.+?:)/);
+        if (!parts) {
+          return message.reply('⚠️ الصيغة: `!تذكرة تعيين_ايموجي [الاسم] :ايموجي:`');
+        }
+        const name = parts[1].trim();
+        const emoji = parts[2];
+        const idx = settings.sections.findIndex(s => s.name === name);
+        if (idx === -1) return message.reply(`⚠️ لا يوجد قسم باسم "${name}".`);
+        settings.sections[idx].emoji = emoji;
+        await settings.save();
+        await message.reply(`✅ تم تعيين إيموجي القسم **${name}** إلى ${emoji}`);
+        return;
+      }
+
+      if (subCmd === 'نص') {
+        const text = rest;
+        if (!text) return message.reply('⚠️ أدخل النص الجديد.');
+        settings.text = text;
+        await settings.save();
+        await message.reply(`✅ تم تغيير نص لوحة التذاكر إلى:\n${text}`);
+        return;
+      }
+
+      if (subCmd === 'صورة') {
+        const image = rest;
+        if (!image || !image.match(/^https?:\/\/.+/)) return message.reply('⚠️ رابط صورة غير صالح.');
+        settings.image = image;
+        await settings.save();
+        await message.reply(`✅ تم تغيير صورة لوحة التذاكر: ${image}`);
+        return;
+      }
+
+      await message.reply('⚠️ أمر فرعي غير معروف. استخدم `!تذكرة` لعرض التعليمات.');
       return;
     }
 
