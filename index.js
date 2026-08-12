@@ -192,7 +192,6 @@ const TicketSettingsSchema = new mongoose.Schema({
     emoji: { type: String, default: '📌' },
     canRestart: { type: Boolean, default: false },
   }],
-  // تم إزالة الحقول text و image واستخدامها من Config مباشرة
   ticketCounter: { type: Number, default: 0 },
 });
 const TicketSettings = mongoose.model('TicketSettings', TicketSettingsSchema);
@@ -256,7 +255,6 @@ const NameCooldownSchema = new mongoose.Schema({
 });
 const NameCooldown = mongoose.model('NameCooldown', NameCooldownSchema);
 
-// ========== نموذج إعدادات الخريطة (جديد) ==========
 const MapConfigSchema = new mongoose.Schema({
   guildId: { type: String, unique: true, required: true },
   title: { type: String, default: '🗺️ خريطة السيرفر' },
@@ -264,7 +262,7 @@ const MapConfigSchema = new mongoose.Schema({
   banner: { type: String, default: '' },
   sections: [{
     name: String,
-    channels: [String] // قائمة معرفات القنوات
+    channels: [String]
   }]
 });
 const MapConfig = mongoose.model('MapConfig', MapConfigSchema);
@@ -592,7 +590,6 @@ async function generateTicketHTML(channel, logData) {
   return html;
 }
 
-// ========== دوال إعدادات الخريطة (جديد) ==========
 async function getMapConfig(guildId) {
   let map = await MapConfig.findOne({ guildId });
   if (!map) {
@@ -844,7 +841,7 @@ function getSettingsData() {
 }
 
 // ============================================================
-// ========== دوال عرض اللوحات (جميع الأزرار Secondary) ==========
+// ========== دوال عرض اللوحات ==========
 // ============================================================
 
 async function sendHelpPanel(interaction) {
@@ -959,12 +956,9 @@ async function sendRolesPanel(channel, config, guildId) {
 }
 
 // ============================================================
-// ========== دوال خريطة السيرفر (المعدلة) ==========
+// ========== دوال خريطة السيرفر ==========
 // ============================================================
 
-/**
- * توليد إمبيد خريطة السيرفر (بدون عرض أسماء الأقسام في الحقول)
- */
 async function generateServerMapEmbed(guild, member, config, mapConfig) {
   const embed = new EmbedBuilder()
     .setTitle(mapConfig.title || '🗺️ خريطة السيرفر')
@@ -978,19 +972,13 @@ async function generateServerMapEmbed(guild, member, config, mapConfig) {
     const generalImage = getGeneralImage(guild, config);
     if (generalImage) embed.setImage(generalImage);
   }
-
-  // لا نضيف أي حقول للأقسام
   return embed;
 }
 
-/**
- * بناء أزرار الخريطة (تظهر فقط إذا كان هناك أقسام، وإلا يظهر زر الإضافة فقط)
- */
 function buildMapButtons(mapConfig) {
   const rows = [];
   const sections = mapConfig.sections || [];
 
-  // صف التحكم (تحديث + إضافة)
   const controlRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('refresh_map')
@@ -1003,7 +991,6 @@ function buildMapButtons(mapConfig) {
   );
   rows.push(controlRow);
 
-  // أزرار الأقسام (فقط إذا وجدت)
   if (sections.length > 0) {
     const sectionButtons = sections.map((section, index) => 
       new ButtonBuilder()
@@ -1016,8 +1003,28 @@ function buildMapButtons(mapConfig) {
       rows.push(new ActionRowBuilder().addComponents(chunk));
     }
   }
-
   return rows;
+}
+
+// 🔧 دالة جديدة لإنشاء Embed البانل (لتوحيد الكود وضمان ظهور الصورة)
+async function createTicketPanelEmbed(guild, config) {
+  const title = config.uiTicketTitle || '🎫 تذاكر دعم فني';
+  const description = config.uiTicketDescription || 'اختر القسم المناسب لطلب المساعدة.';
+  // استخدام الصورة المخصصة أولاً، وإلا الصورة الافتراضية
+  let image = config.uiTicketImage || 'https://i.imgur.com/GkKqN3G.png';
+  
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(description)
+    .setColor(0x2b2d31)
+    .setImage(image) // 🔧 وضع الصورة هنا مباشرة
+    .setTimestamp();
+  
+  // إضافة صورة مصغرة (اختياري) من الصورة العامة
+  const generalImage = getGeneralImage(guild, config);
+  if (generalImage) embed.setThumbnail(generalImage);
+  
+  return embed;
 }
 
 // ============================================================
@@ -1084,7 +1091,7 @@ client.once('clientReady', async () => {
 });
 
 // ============================================================
-// ========== الترحيب ==========
+// ========== الترحيب وأحداث السيرفر ==========
 // ============================================================
 
 function drawDefaultBackground(ctx, width, height) {
@@ -1455,25 +1462,13 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // 🔧 أمر بانل (سلاش) - معدل لاستخدام الدالة الجديدة
     if (commandName === 'بانل') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
       }
       const settings = await getTicketSettings(guildId);
-      // استخدام الإعدادات من config مع الأولوية
-      const title = config.uiTicketTitle || '🎫 تذاكر دعم فني';
-      const description = config.uiTicketDescription || 'اختر القسم المناسب لطلب المساعدة.';
-      const image = config.uiTicketImage || 'https://i.imgur.com/GkKqN3G.png';
-      
-      const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(description)
-        .setColor(0x2b2d31)
-        .setImage(image)
-        .setTimestamp();
-      const generalImage = getGeneralImage(interaction.guild, config);
-      if (generalImage) embed.setThumbnail(generalImage);
-      if (config.uiBannerUrl) embed.setImage(config.uiBannerUrl);
+      const embed = await createTicketPanelEmbed(interaction.guild, config);
       
       const options = settings.sections.map(s => ({
         label: s.name,
@@ -1498,14 +1493,15 @@ client.on('interactionCreate', async (interaction) => {
         .setDescription(`
 **العنوان:** ${config.uiTicketTitle || 'غير محدد'}
 **الوصف:** ${config.uiTicketDescription || 'غير محدد'}
-**الصورة:** ${config.uiTicketImage ? `[رابط](${config.uiTicketImage})` : 'غير محدد'}
-**بانر:** ${config.uiBannerUrl ? `[رابط](${config.uiBannerUrl})` : 'غير محدد'}
+**صورة البانل:** ${config.uiTicketImage ? `[رابط](${config.uiTicketImage})` : 'غير محدد (سيتم استخدام الصورة الافتراضية)'}
+**بانر عام:** ${config.uiBannerUrl ? `[رابط](${config.uiBannerUrl})` : 'غير محدد'}
         `)
         .addFields(
           { name: '📌 الأقسام', value: settings.sections.map((s, i) => `${i+1}. ${s.emoji || '📌'} **${s.name}** ${s.roleId ? `<@&${s.roleId}>` : '(بدون دور)'}${s.canRestart ? ' 🔄' : ''}`).join('\n') || 'لا يوجد أقسام' }
         );
+      if (config.uiTicketImage) embed.setImage(config.uiTicketImage);
       const generalImage = getGeneralImage(interaction.guild, config);
-      if (generalImage) embed.setImage(generalImage);
+      if (generalImage) embed.setThumbnail(generalImage);
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
@@ -1885,7 +1881,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== أمر الخريطة (سلاش) =====
     if (commandName === 'خريطة') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
@@ -2086,7 +2081,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== قائمة اختيار القنوات عند إضافة قسم للخريطة (لم نعد نستخدمها) =====
     if (interaction.customId === 'map_select_channels') {
       return interaction.reply({ content: '⚠️ تم تحديث النظام: يرجى استخدام المودال لإدخال معرفات القنوات.', flags: MessageFlags.Ephemeral });
     }
@@ -2097,7 +2091,6 @@ client.on('interactionCreate', async (interaction) => {
   // ============================================================
 
   if (interaction.isButton()) {
-    // ===== أزرار أقسام الخريطة =====
     if (interaction.customId.startsWith('map_section_')) {
       const index = parseInt(interaction.customId.split('_')[2]);
       const mapConfig = await getMapConfig(guildId);
@@ -2714,7 +2707,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== زر تحديث الخريطة =====
     if (interaction.customId === 'refresh_map') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ ليس لديك صلاحية.', flags: MessageFlags.Ephemeral });
@@ -2726,7 +2718,6 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== زر إضافة قسم للخريطة =====
     if (interaction.customId === 'map_add_section') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ ليس لديك صلاحية.', flags: MessageFlags.Ephemeral });
@@ -3009,18 +3000,15 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    // ===== مودال إضافة قسم الخريطة (جديد) =====
     if (interaction.customId === 'map_section_modal') {
       const sectionName = interaction.fields.getTextInputValue('map_section_name');
       const channelsInput = interaction.fields.getTextInputValue('map_channels_ids');
 
-      // استخراج المعرفات من النص (أرقام فقط)
       const ids = channelsInput.match(/\d{17,20}/g) || [];
       if (ids.length === 0) {
         return interaction.reply({ content: '⚠️ لم يتم العثور على معرفات صالحة. تأكد من إدخال معرفات القنوات (أرقام).', flags: MessageFlags.Ephemeral });
       }
 
-      // التحقق من صحة المعرفات
       const validIds = [];
       const invalidIds = [];
       for (const id of ids) {
@@ -3036,7 +3024,6 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '❌ لم يتم العثور على قنوات صالحة (نصية أو صوتية) بهذه المعرفات.', flags: MessageFlags.Ephemeral });
       }
 
-      // حفظ القسم في قاعدة البيانات
       const mapConfig = await getMapConfig(guildId);
       const existingIndex = mapConfig.sections.findIndex(s => s.name === sectionName);
       if (existingIndex !== -1) {
@@ -3053,14 +3040,11 @@ client.on('interactionCreate', async (interaction) => {
 
       await interaction.reply({ content: replyMsg, flags: MessageFlags.Ephemeral });
 
-      // تحديث الخريطة المعروضة (نقوم بتحديث الرسالة الأصلية إن وجدت)
       try {
         const embed = await generateServerMapEmbed(interaction.guild, interaction.member, config, mapConfig);
         const components = buildMapButtons(mapConfig);
         await interaction.message?.edit({ embeds: [embed], components }).catch(() => {});
-      } catch (e) {
-        // إذا لم تكن هناك رسالة أصلية، نتجاهل
-      }
+      } catch (e) {}
       return;
     }
   }
@@ -3069,8 +3053,6 @@ client.on('interactionCreate', async (interaction) => {
 // ============================================================
 // ========== معالج الرسائل النصية ==========
 // ============================================================
-
-let tempMapData = {};
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.guild) return;
@@ -3116,7 +3098,6 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // ===== أمر تعيين مع دعم الوسائط الفرعية =====
     if (cmd === 'تعيين') {
       if (args.length === 0) {
         if (message.author.id !== OWNER_ID) return message.reply('❌ هذا الأمر للمالك فقط.');
@@ -3146,6 +3127,77 @@ client.on('messageCreate', async (message) => {
       const value = args.slice(1).join(' ');
 
       const settingHandlers = {
+        // ===== إعدادات التذاكر =====
+        'تذكرة_صورة': async () => {
+          if (!value || !value.match(/^https?:\/\/.+/)) {
+            return message.reply('⚠️ رابط صورة غير صالح. تأكد من أن الرابط يبدأ بـ http:// أو https:// وينتهي بامتداد صورة.');
+          }
+          await updateGuildConfig(guildId, { uiTicketImage: value });
+          await message.reply(`✅ تم تعيين صورة لوحة التذاكر:\n${value}`);
+        },
+        'تذكرة_نص': async () => {
+          if (!value) return message.reply('⚠️ أدخل النص الجديد.');
+          await updateGuildConfig(guildId, { uiTicketDescription: value });
+          await message.reply(`✅ تم تغيير نص وصف لوحة التذاكر إلى:\n${value}`);
+        },
+        'تذكرة_عنوان': async () => {
+          if (!value) return message.reply('⚠️ أدخل النص.');
+          await updateGuildConfig(guildId, { uiTicketTitle: value });
+          await message.reply(`✅ تم تغيير عنوان لوحة التذاكر إلى:\n${value}`);
+        },
+        'تذكرة_اضافة': async () => {
+          const parts = value.match(/(.+?)\s+<@&(\d+)>\s*([^\s]+)(?:\s+(true|false))?/);
+          if (!parts) {
+            return message.reply('⚠️ الصيغة: `!تعيين تذكرة_اضافة [الاسم] @دور [ايموجي] [true/false]`\nمثال: `!تعيين تذكرة_اضافة الدعم الفني @Support 🔧 true`');
+          }
+          const name = parts[1].trim();
+          const roleId = parts[2];
+          const emoji = parts[3] || '📌';
+          const canRestart = parts[4] === 'true' ? true : false;
+          const role = message.guild.roles.cache.get(roleId);
+          if (!role) return message.reply('❌ الدور غير موجود.');
+          const settings = await getTicketSettings(guildId);
+          if (settings.sections.some(s => s.name === name)) {
+            return message.reply(`⚠️ قسم باسم "${name}" موجود بالفعل.`);
+          }
+          settings.sections.push({ name, roleId, emoji, canRestart });
+          await settings.save();
+          await message.reply(`✅ تم إضافة قسم **${name}** مع دور ${role} ${emoji} ${canRestart ? '(قابل لإعادة الفتح)' : ''}`);
+          await logToChannel(guildId, {
+            title: '🎫 إضافة قسم تذكرة',
+            color: 0x2b2d31,
+            description: `**المضيف:** ${message.author}\n**الاسم:** ${name}\n**الدور:** ${role.name}\n**الإيموجي:** ${emoji}\n**إعادة فتح:** ${canRestart}`
+          });
+        },
+        'تذكرة_حذف': async () => {
+          if (!value) return message.reply('⚠️ أدخل اسم القسم.');
+          const settings = await getTicketSettings(guildId);
+          const idx = settings.sections.findIndex(s => s.name === value);
+          if (idx === -1) return message.reply(`⚠️ لا يوجد قسم باسم "${value}".`);
+          settings.sections.splice(idx, 1);
+          await settings.save();
+          await message.reply(`✅ تم حذف القسم **${value}**.`);
+          await logToChannel(guildId, {
+            title: '🎫 حذف قسم تذكرة',
+            color: 0x2b2d31,
+            description: `**المضيف:** ${message.author}\n**الاسم:** ${value}`
+          });
+        },
+        'تذكرة_تعيين_ايموجي': async () => {
+          const parts = value.match(/(.+?)\s+(:.+?:)/);
+          if (!parts) {
+            return message.reply('⚠️ الصيغة: `!تعيين تذكرة_تعيين_ايموجي [الاسم] :ايموجي:`');
+          }
+          const name = parts[1].trim();
+          const emoji = parts[2];
+          const settings = await getTicketSettings(guildId);
+          const idx = settings.sections.findIndex(s => s.name === name);
+          if (idx === -1) return message.reply(`⚠️ لا يوجد قسم باسم "${name}".`);
+          settings.sections[idx].emoji = emoji;
+          await settings.save();
+          await message.reply(`✅ تم تعيين إيموجي القسم **${name}** إلى ${emoji}`);
+        },
+        // ===== باقي الإعدادات =====
         'ترحيب': async () => {
           const channel = message.mentions.channels.first();
           if (!channel) return message.reply('⚠️ منشن القناة.');
@@ -3240,76 +3292,6 @@ client.on('messageCreate', async (message) => {
           await deleteAutoLine(guildId, channel.id);
           await message.reply(`✅ تم حذف الأوتو لاين من ${channel}`);
         },
-        // ===== أوامر التذاكر ضمن تعيين =====
-        'تذكرة_اضافة': async () => {
-          // الصيغة: !تعيين تذكرة_اضافة [الاسم] @دور [ايموجي] [true/false]
-          const parts = value.match(/(.+?)\s+<@&(\d+)>\s*([^\s]+)(?:\s+(true|false))?/);
-          if (!parts) {
-            return message.reply('⚠️ الصيغة: `!تعيين تذكرة_اضافة [الاسم] @دور [ايموجي] [true/false]`\nمثال: `!تعيين تذكرة_اضافة الدعم الفني @Support 🔧 true`');
-          }
-          const name = parts[1].trim();
-          const roleId = parts[2];
-          const emoji = parts[3] || '📌';
-          const canRestart = parts[4] === 'true' ? true : false;
-          const role = message.guild.roles.cache.get(roleId);
-          if (!role) return message.reply('❌ الدور غير موجود.');
-          const settings = await getTicketSettings(guildId);
-          if (settings.sections.some(s => s.name === name)) {
-            return message.reply(`⚠️ قسم باسم "${name}" موجود بالفعل.`);
-          }
-          settings.sections.push({ name, roleId, emoji, canRestart });
-          await settings.save();
-          await message.reply(`✅ تم إضافة قسم **${name}** مع دور ${role} ${emoji} ${canRestart ? '(قابل لإعادة الفتح)' : ''}`);
-          await logToChannel(guildId, {
-            title: '🎫 إضافة قسم تذكرة',
-            color: 0x2b2d31,
-            description: `**المضيف:** ${message.author}\n**الاسم:** ${name}\n**الدور:** ${role.name}\n**الإيموجي:** ${emoji}\n**إعادة فتح:** ${canRestart}`
-          });
-        },
-        'تذكرة_حذف': async () => {
-          if (!value) return message.reply('⚠️ أدخل اسم القسم.');
-          const settings = await getTicketSettings(guildId);
-          const idx = settings.sections.findIndex(s => s.name === value);
-          if (idx === -1) return message.reply(`⚠️ لا يوجد قسم باسم "${value}".`);
-          settings.sections.splice(idx, 1);
-          await settings.save();
-          await message.reply(`✅ تم حذف القسم **${value}**.`);
-          await logToChannel(guildId, {
-            title: '🎫 حذف قسم تذكرة',
-            color: 0x2b2d31,
-            description: `**المضيف:** ${message.author}\n**الاسم:** ${value}`
-          });
-        },
-        'تذكرة_تعيين_ايموجي': async () => {
-          const parts = value.match(/(.+?)\s+(:.+?:)/);
-          if (!parts) {
-            return message.reply('⚠️ الصيغة: `!تعيين تذكرة_تعيين_ايموجي [الاسم] :ايموجي:`');
-          }
-          const name = parts[1].trim();
-          const emoji = parts[2];
-          const settings = await getTicketSettings(guildId);
-          const idx = settings.sections.findIndex(s => s.name === name);
-          if (idx === -1) return message.reply(`⚠️ لا يوجد قسم باسم "${name}".`);
-          settings.sections[idx].emoji = emoji;
-          await settings.save();
-          await message.reply(`✅ تم تعيين إيموجي القسم **${name}** إلى ${emoji}`);
-        },
-        'تذكرة_نص': async () => {
-          if (!value) return message.reply('⚠️ أدخل النص الجديد.');
-          await updateGuildConfig(guildId, { uiTicketDescription: value });
-          await message.reply(`✅ تم تغيير نص وصف لوحة التذاكر إلى:\n${value}`);
-        },
-        'تذكرة_صورة': async () => {
-          if (!value || !value.match(/^https?:\/\/.+/)) return message.reply('⚠️ رابط صورة غير صالح.');
-          await updateGuildConfig(guildId, { uiTicketImage: value });
-          await message.reply(`✅ تم تغيير صورة لوحة التذاكر: ${value}`);
-        },
-        'تذكرة_عنوان': async () => {
-          if (!value) return message.reply('⚠️ أدخل النص.');
-          await updateGuildConfig(guildId, { uiTicketTitle: value });
-          await message.reply(`✅ تم تغيير عنوان لوحة التذاكر: ${value}`);
-        },
-        // باقي الأوامر كما هي...
         'اضافة_رتبة': async () => {
           if (!value) return message.reply('⚠️ أدخل اسم الرتبة.');
           let roles = config.uiRolesOptions || [];
@@ -3500,21 +3482,6 @@ client.on('messageCreate', async (message) => {
           await updateGuildConfig(guildId, { uiLeaveImage: value });
           await message.reply(`✅ تم تعيين صورة لوحة الإجازات: ${value}`);
         },
-        'عنوان_تذكرة_بانل': async () => {
-          if (!value) return message.reply('⚠️ أدخل النص.');
-          await updateGuildConfig(guildId, { uiTicketTitle: value });
-          await message.reply(`✅ تم تعيين عنوان لوحة التذاكر: ${value}`);
-        },
-        'وصف_تذكرة_بانل': async () => {
-          if (!value) return message.reply('⚠️ أدخل النص.');
-          await updateGuildConfig(guildId, { uiTicketDescription: value });
-          await message.reply(`✅ تم تعيين وصف لوحة التذاكر: ${value}`);
-        },
-        'صورة_تذكرة_بانل': async () => {
-          if (!value || !value.match(/^https?:\/\/.+/)) return message.reply('⚠️ رابط صورة غير صالح.');
-          await updateGuildConfig(guildId, { uiTicketImage: value });
-          await message.reply(`✅ تم تعيين صورة لوحة التذاكر: ${value}`);
-        },
         'نقاط_المهمة': async () => {
           const points = parseInt(value);
           if (isNaN(points) || points < 1) return message.reply('⚠️ أدخل عدداً صحيحاً موجباً.');
@@ -3560,9 +3527,53 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // ===== تم حذف أمر !تذكرة المستقل =====
+    // ===== أمر بانل (النصي) =====
+    if (cmd === 'بانل') {
+      if (!(await hasPermission(message.member, guildId))) {
+        return message.reply('❌ تحتاج صلاحية متحكم.');
+      }
+      const settings = await getTicketSettings(guildId);
+      const embed = await createTicketPanelEmbed(message.guild, config);
+      
+      const options = settings.sections.map(s => ({
+        label: s.name,
+        value: s.name,
+        emoji: s.emoji || '📌',
+      }));
+      if (!options.length) {
+        return message.reply('⚠️ لا توجد أقسام مضافة.');
+      }
+      const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder().setCustomId('ticket_menu').setPlaceholder('📌 اختر القسم...').addOptions(options)
+      );
+      await message.channel.send({ embeds: [embed], components: [row] });
+      await message.reply('✅ تم إنشاء لوحة التذاكر.');
+      return;
+    }
 
-    // ===== باقي الأوامر (مستوى، ترتيب، لوحة_المهام، إلخ) =====
+    // ===== عرض_تذكرة (النصي) =====
+    if (cmd === 'عرض_تذكرة') {
+      const settings = await getTicketSettings(guildId);
+      const embed = new EmbedBuilder()
+        .setTitle('📋 إعدادات التذاكر')
+        .setColor(0x2b2d31)
+        .setDescription(`
+**العنوان:** ${config.uiTicketTitle || 'غير محدد'}
+**الوصف:** ${config.uiTicketDescription || 'غير محدد'}
+**صورة البانل:** ${config.uiTicketImage ? `[رابط](${config.uiTicketImage})` : 'غير محدد (سيتم استخدام الصورة الافتراضية)'}
+**بانر عام:** ${config.uiBannerUrl ? `[رابط](${config.uiBannerUrl})` : 'غير محدد'}
+        `)
+        .addFields(
+          { name: '📌 الأقسام', value: settings.sections.map((s, i) => `${i+1}. ${s.emoji || '📌'} **${s.name}** ${s.roleId ? `<@&${s.roleId}>` : '(بدون دور)'}${s.canRestart ? ' 🔄' : ''}`).join('\n') || 'لا يوجد أقسام' }
+        );
+      if (config.uiTicketImage) embed.setImage(config.uiTicketImage);
+      const generalImage = getGeneralImage(message.guild, config);
+      if (generalImage) embed.setThumbnail(generalImage);
+      await message.channel.send({ embeds: [embed] });
+      return;
+    }
+
+    // ===== باقي الأوامر =====
     if (cmd === 'مستوى') {
       const member = message.mentions.members.first() || message.member;
       const user = await getUser(guildId, member.id);
@@ -3918,7 +3929,6 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // ====== أمر خريطة السيرفر (نصي) ======
     if (cmd === 'خريطة' || cmd === 'بانل_خريطة') {
       if (!(await hasPermission(message.member, guildId))) {
         return message.reply('❌ تحتاج صلاحية متحكم.');
@@ -3931,7 +3941,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    // ====== أوامر الإشراف الكاملة ======
+    // ===== أوامر الإشراف الكاملة =====
     if (cmd === 'حظر') {
       if (!(await hasPermission(message.member, guildId))) {
         sentReply = await message.reply('❌ تحتاج صلاحية متحكم.');
@@ -4500,55 +4510,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    if (cmd === 'بانل') {
-      if (!(await hasPermission(message.member, guildId))) { await message.reply('❌ تحتاج صلاحية متحكم.'); return; }
-      const settings = await getTicketSettings(guildId);
-      // استخدام الإعدادات من config مع الأولوية
-      const title = config.uiTicketTitle || '🎫 تذاكر دعم فني';
-      const description = config.uiTicketDescription || 'اختر القسم المناسب لطلب المساعدة.';
-      const image = config.uiTicketImage || 'https://i.imgur.com/GkKqN3G.png';
-      
-      const embed = new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(description)
-        .setColor(0x2b2d31)
-        .setImage(image)
-        .setTimestamp();
-      if (generalImage) embed.setThumbnail(generalImage);
-      if (config.uiBannerUrl) embed.setImage(config.uiBannerUrl);
-      
-      const options = settings.sections.map(s => ({
-        label: s.name,
-        value: s.name,
-        emoji: s.emoji || '📌',
-      }));
-      if (!options.length) { await message.reply('⚠️ لا توجد أقسام مضافة.'); return; }
-      const row = new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder().setCustomId('ticket_menu').setPlaceholder('📌 اختر القسم...').addOptions(options)
-      );
-      await message.channel.send({ embeds: [embed], components: [row] });
-      await message.reply('✅ تم إنشاء لوحة التذاكر.');
-      return;
-    }
-
-    if (cmd === 'عرض_تذكرة') {
-      const settings = await getTicketSettings(guildId);
-      const embed = new EmbedBuilder()
-        .setTitle('📋 إعدادات التذاكر')
-        .setColor(0x2b2d31)
-        .setDescription(`
-**العنوان:** ${config.uiTicketTitle || 'غير محدد'}
-**الوصف:** ${config.uiTicketDescription || 'غير محدد'}
-**الصورة:** ${config.uiTicketImage ? `[رابط](${config.uiTicketImage})` : 'غير محدد'}
-**بانر:** ${config.uiBannerUrl ? `[رابط](${config.uiBannerUrl})` : 'غير محدد'}
-        `)
-        .addFields(
-          { name: '📌 الأقسام', value: settings.sections.map((s, i) => `${i+1}. ${s.emoji || '📌'} **${s.name}** ${s.roleId ? `<@&${s.roleId}>` : '(بدون دور)'}${s.canRestart ? ' 🔄' : ''}`).join('\n') || 'لا يوجد أقسام' }
-        );
-      if (generalImage) embed.setImage(generalImage);
-      await message.channel.send({ embeds: [embed] });
-      return;
-    }
+    // تم حذف أمر !تذكرة المستقل
 
     if (cmd === 'رد_تلقائي') {
       if (!(await hasPermission(message.member, guildId))) { await message.reply('❌ تحتاج صلاحية متحكم.'); return; }
