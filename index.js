@@ -746,7 +746,7 @@ function getSettingsData() {
       description: 'إدارة أقسام التذاكر.',
       options: [
         '`تذكرة` - عرض تعليمات إدارة التذاكر',
-        '`تذكرة إضافة [الاسم] @دور :ايموجي: [قابل_لإعادة]` - إضافة قسم',
+        '`تذكرة إضافة [الاسم] @دور [ايموجي] [true/false]` - إضافة قسم (الإيموجي: رمز أو <:name:id>)',
         '`تذكرة تعيين_ايموجي [الاسم] :ايموجي:` - تغيير إيموجي القسم',
         '`تذكرة حذف [الاسم]` - حذف قسم',
         '`تذكرة نص [النص]` - تغيير نص لوحة التذاكر',
@@ -2377,12 +2377,10 @@ client.on('interactionCreate', async (interaction) => {
           { name: '📥 استلمها', value: claimedBy ? claimedBy.toString() : 'لم تستلم', inline: true },
           { name: '👥 الأعضاء المضافين', value: addedMembersMentions, inline: false },
           { name: '⏱️ وقت الإغلاق', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
-          // الحقل الجديد: من أغلق التذكرة
           { name: '🔒 أغلقها', value: interaction.user.toString(), inline: true }
         )
         .setTimestamp();
       const replyData = {
-        // تعديل الرسالة لتشمل اسم المحكم
         content: `🔒 تم إغلاق التذكرة بواسطة ${interaction.user}.${generationFailed ? ' ⚠️ حدث خطأ أثناء توليد ملف HTML، لكن التقرير النصي موجود أدناه.' : ''}`,
         embeds: [embed]
       };
@@ -3231,6 +3229,7 @@ client.on('messageCreate', async (message) => {
           await deleteAutoLine(guildId, channel.id);
           await message.reply(`✅ تم حذف الأوتو لاين من ${channel}`);
         },
+        // تم تعديل تذكرة هنا لإظهار التعليمات (سيتم التعامل معها في أمر منفصل)
         'تذكرة': async () => {
           await message.reply('⚠️ استخدم الأمر `!تذكرة` لإدارة التذاكر.');
         },
@@ -3499,7 +3498,7 @@ client.on('messageCreate', async (message) => {
           .setColor(0x2b2d31)
           .setDescription(`
             **الأوامر المتاحة:**
-            \`!تذكرة إضافة [الاسم] @دور :ايموجي: [قابل_لإعادة]\` - إضافة قسم جديد (قابل_لإعادة: true/false)
+            \`!تذكرة إضافة [الاسم] @دور [ايموجي] [true/false]\` - إضافة قسم جديد (الإيموجي: رمز أو <:name:id>)
             \`!تذكرة حذف [الاسم]\` - حذف قسم
             \`!تذكرة تعيين_ايموجي [الاسم] :ايموجي:\` - تغيير إيموجي القسم
             \`!تذكرة نص [النص]\` - تغيير نص لوحة التذاكر
@@ -3514,10 +3513,12 @@ client.on('messageCreate', async (message) => {
       const settings = await getTicketSettings(guildId);
 
       if (subCmd === 'إضافة') {
-        // تنسيق: !تذكرة إضافة [الاسم] @دور :ايموجي: [قابل_لإعادة]
-        const parts = rest.match(/(.+?)\s+<@&(\d+)>\s*(:[\w]+:)?\s*(true|false)?/);
+        // الصيغة: !تذكرة إضافة [الاسم] @دور [ايموجي] [true/false]
+        // حيث الإيموجي يمكن أن يكون رمزاً أو <:name:id> أو :emoji:
+        // سنستخدم regex لالتقاط الاسم، الدور، الإيموجي (أول كلمة بعد الدور)، ثم true/false اختياري
+        const parts = rest.match(/(.+?)\s+<@&(\d+)>\s*([^\s]+)(?:\s+(true|false))?/);
         if (!parts) {
-          return message.reply('⚠️ الصيغة: `!تذكرة إضافة [الاسم] @دور :ايموجي: [true/false]`\nمثال: `!تذكرة إضافة الدعم الفني @Support :🛠: true`');
+          return message.reply('⚠️ الصيغة: `!تذكرة إضافة [الاسم] @دور [ايموجي] [true/false]`\nمثال: `!تذكرة إضافة الدعم الفني @Support 🔧 true`\nأو: `!تذكرة إضافة الدعم الفني @Support <:support:123456789> true`');
         }
         const name = parts[1].trim();
         const roleId = parts[2];
