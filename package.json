@@ -1,13 +1,18 @@
 {
-  "name": "management-bot",
+  "name": "discord-ultimate-bot",
   "version": "1.0.0",
+  "description": "Bot متكامل مع جميع الأنظمة (تذاكر، إجازات، متجر، مستويات، أسئلة شائعة، تحكم، تقييم، خريطة، أوتولاين، ردود تلقائية، أوامر إشراف)",
+  "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "@napi-rs/canvas": "^0.1.44",
-    "express": "^4.18.2",
-    "mongoose": "^8.0.0"
+    "@napi-rs/canvas": "^0.1.52",
+    "discord.js": "^14.15.3",
+    "express": "^4.19.2",
+    "mongoose": "^8.4.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
