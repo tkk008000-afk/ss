@@ -731,7 +731,7 @@ function getSettingsData() {
       description: 'رسائل أو صور تظهر تلقائياً في قناة.',
       options: [
         '`اوتر_لاين #روم [نص]` - تعيين نص أوتو لاين',
-        '`صورة_اوترلاين #روم رابط` - تعيين صورة أوتو لاين',
+        '`صورة_اوترلاين #روم رابط` - تعيين صورة أوتو لاين (تُرسل الصورة فقط بدون Embed)',
         '`تفعيل_اوترلاين #روم` - تفعيل الأوتو لاين',
         '`تعطيل_اوترلاين #روم` - تعطيل الأوتو لاين',
         '`حذف_اوترلاين #روم` - حذف الأوتو لاين'
@@ -1305,25 +1305,27 @@ client.on('messageCreate', async (message) => {
     console.error('[XP ERROR]', err);
   }
 
+  // ===== الأوتو لاين (تم تعديله لإرسال الصورة فقط بدون Embed) =====
   const auto = await AutoLine.findOne({ guildId, channelId: message.channel.id });
-  if (auto && auto.enabled && (auto.text || auto.image)) {
+  if (auto && auto.enabled) {
     const channel = client.channels.cache.get(message.channel.id);
     if (channel) {
       try {
-        if (auto.text && auto.image) {
-          const embed = new EmbedBuilder().setDescription(auto.text).setColor(0x2b2d31).setImage(auto.image).setTimestamp();
-          await channel.send({ embeds: [embed] });
+        if (auto.image && auto.text) {
+          // إرسال النص والصورة معًا (رابط الصورة سيظهر مضمّناً)
+          await channel.send(`${auto.text}\n${auto.image}`);
         } else if (auto.image) {
-          const embed = new EmbedBuilder().setColor(0x2b2d31).setImage(auto.image).setTimestamp();
-          await channel.send({ embeds: [embed] });
+          // إرسال الصورة فقط (الرابط سيظهر كصورة)
+          await channel.send(auto.image);
         } else if (auto.text) {
           await channel.send(auto.text);
         }
-      } catch (e) {}
+      } catch (e) { console.error('[AUTOLINE ERROR]', e); }
       return;
     }
   }
 
+  // ===== الردود التلقائية =====
   const autoReply = await findAutoReply(guildId, message.content);
   if (autoReply) {
     try {
@@ -4436,15 +4438,21 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    // ===== أمر قول المعدل: يحذف رسالة المستخدم فوراً =====
     if (cmd === 'قول') {
+      // حذف رسالة الأمر فوراً
+      try { await message.delete(); } catch (e) {}
+
       const text = args.join(' ');
       if (!text) {
-        sentReply = await message.reply('⚠️ اكتب النص.');
-        deleteAfter(sentReply);
+        const errorMsg = await message.channel.send('⚠️ اكتب النص.');
+        setTimeout(async () => {
+          try { await errorMsg.delete(); } catch (e) {}
+        }, 5000);
         return;
       }
-      sentReply = await message.channel.send(text);
-      deleteAfter(sentReply);
+
+      await message.channel.send(text);
       return;
     }
 
@@ -4509,8 +4517,6 @@ client.on('messageCreate', async (message) => {
       await message.reply('✅ تم إنشاء لوحة الاقتراحات.');
       return;
     }
-
-    // تم حذف أمر !تذكرة المستقل
 
     if (cmd === 'رد_تلقائي') {
       if (!(await hasPermission(message.member, guildId))) { await message.reply('❌ تحتاج صلاحية متحكم.'); return; }
