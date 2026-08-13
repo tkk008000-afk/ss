@@ -267,6 +267,16 @@ const MapConfigSchema = new mongoose.Schema({
 });
 const MapConfig = mongoose.model('MapConfig', MapConfigSchema);
 
+// ===== نموذج التقييمات (جديد) =====
+const RatingSchema = new mongoose.Schema({
+  guildId: String,
+  userId: String,
+  rating: { type: Number, default: 0 },
+  lastUpdate: Date,
+});
+RatingSchema.index({ guildId: 1, userId: 1 }, { unique: true });
+const Rating = mongoose.model('Rating', RatingSchema);
+
 // ============================================================
 // ========== دوال مساعدة ==========
 // ============================================================
@@ -602,6 +612,28 @@ async function updateMapConfig(guildId, data) {
   await MapConfig.findOneAndUpdate({ guildId }, data, { upsert: true, new: true });
 }
 
+// ===== دوال التقييمات (جديدة) =====
+async function getRating(guildId, userId) {
+  let rating = await Rating.findOne({ guildId, userId });
+  if (!rating) {
+    rating = new Rating({ guildId, userId, rating: 0 });
+    await rating.save();
+  }
+  return rating;
+}
+
+async function addRating(guildId, userId, amount = 1) {
+  const rating = await getRating(guildId, userId);
+  rating.rating += amount;
+  rating.lastUpdate = new Date();
+  await rating.save();
+  return rating.rating;
+}
+
+async function getTopRatings(guildId, limit = 10) {
+  return await Rating.find({ guildId }).sort({ rating: -1 }).limit(limit);
+}
+
 // ============================================================
 // ========== دوال بيانات القوائم ==========
 // ============================================================
@@ -619,6 +651,8 @@ function getHelpData() {
         { name: 'تغيير_اسم', value: 'فتح لوحة تغيير الاسم', inline: true },
         { name: 'رتب', value: 'فتح لوحة الرتب (قائمة منسدلة)', inline: true },
         { name: 'خريطة', value: 'عرض خريطة السيرفر (القنوات والأقسام)', inline: true },
+        { name: 'تقييم', value: 'منح نقطة تقييم لعضو لديه رتبة إشعارات', inline: true },
+        { name: 'تقييمات', value: 'عرض ترتيب التقييمات', inline: true },
       ]
     },
     'admin': {
@@ -1006,21 +1040,19 @@ function buildMapButtons(mapConfig) {
   return rows;
 }
 
-// 🔧 دالة جديدة لإنشاء Embed البانل (لتوحيد الكود وضمان ظهور الصورة)
+// 🔧 دالة جديدة لإنشاء Embed البانل (مع أولوية الصورة)
 async function createTicketPanelEmbed(guild, config) {
   const title = config.uiTicketTitle || '🎫 تذاكر دعم فني';
   const description = config.uiTicketDescription || 'اختر القسم المناسب لطلب المساعدة.';
-  // استخدام الصورة المخصصة أولاً، وإلا الصورة الافتراضية
-  let image = config.uiTicketImage || 'https://i.imgur.com/GkKqN3G.png';
+  let imageUrl = config.uiTicketImage || config.uiBannerUrl || null;
   
   const embed = new EmbedBuilder()
     .setTitle(title)
     .setDescription(description)
     .setColor(0x2b2d31)
-    .setImage(image) // 🔧 وضع الصورة هنا مباشرة
     .setTimestamp();
   
-  // إضافة صورة مصغرة (اختياري) من الصورة العامة
+  if (imageUrl) embed.setImage(imageUrl);
   const generalImage = getGeneralImage(guild, config);
   if (generalImage) embed.setThumbnail(generalImage);
   
@@ -1305,17 +1337,15 @@ client.on('messageCreate', async (message) => {
     console.error('[XP ERROR]', err);
   }
 
-  // ===== الأوتو لاين (تم تعديله لإرسال الصورة فقط بدون Embed) =====
+  // ===== الأوتو لاين =====
   const auto = await AutoLine.findOne({ guildId, channelId: message.channel.id });
   if (auto && auto.enabled) {
     const channel = client.channels.cache.get(message.channel.id);
     if (channel) {
       try {
         if (auto.image && auto.text) {
-          // إرسال النص والصورة معًا (رابط الصورة سيظهر مضمّناً)
           await channel.send(`${auto.text}\n${auto.image}`);
         } else if (auto.image) {
-          // إرسال الصورة فقط (الرابط سيظهر كصورة)
           await channel.send(auto.image);
         } else if (auto.text) {
           await channel.send(auto.text);
@@ -1812,6 +1842,7 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ===== أمر بانل_اقتراح (سلاش) معدل =====
     if (commandName === 'بانل_اقتراح') {
       if (!(await hasPermission(interaction.member, guildId))) {
         return interaction.reply({ content: '❌ تحتاج صلاحية متحكم.', flags: MessageFlags.Ephemeral });
@@ -1823,12 +1854,13 @@ client.on('interactionCreate', async (interaction) => {
         .setColor(color)
         .setTimestamp()
         .setFooter({ text: `بواسطة ${interaction.user.tag}` });
-      if (config.uiSuggestImage) embed.setImage(config.uiSuggestImage);
-      else if (config.suggestionsImage) embed.setImage(config.suggestionsImage);
-      if (config.uiSuggestBanner) embed.setImage(config.uiSuggestBanner);
-      if (config.uiBannerUrl) embed.setImage(config.uiBannerUrl);
+      
+      // أولوية الصورة: صورة الاقتراح المخصصة ← بانر الاقتراح ← بانر عام
+      let imageUrl = config.uiSuggestImage || config.suggestionsImage || config.uiSuggestBanner || config.uiBannerUrl || null;
+      if (imageUrl) embed.setImage(imageUrl);
       const generalImage = getGeneralImage(interaction.guild, config);
       if (generalImage) embed.setThumbnail(generalImage);
+      
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('suggest_modal').setLabel('📝 تقديم اقتراح').setStyle(ButtonStyle.Secondary)
       );
@@ -4440,7 +4472,6 @@ client.on('messageCreate', async (message) => {
 
     // ===== أمر قول المعدل: يحذف رسالة المستخدم فوراً =====
     if (cmd === 'قول') {
-      // حذف رسالة الأمر فوراً
       try { await message.delete(); } catch (e) {}
 
       const text = args.join(' ');
@@ -4496,6 +4527,7 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
+    // ===== أمر بانل_اقتراح (نصي) معدل =====
     if (cmd === 'بانل_اقتراح') {
       if (!(await hasPermission(message.member, guildId))) { await message.reply('❌ تحتاج صلاحية متحكم.'); return; }
       const color = parseInt(config.suggestionsColor?.replace('#', '') || '2b2d31', 16);
@@ -4505,11 +4537,11 @@ client.on('messageCreate', async (message) => {
         .setColor(color)
         .setTimestamp()
         .setFooter({ text: `بواسطة ${message.author.tag}` });
-      if (config.uiSuggestImage) embed.setImage(config.uiSuggestImage);
-      else if (config.suggestionsImage) embed.setImage(config.suggestionsImage);
-      if (config.uiSuggestBanner) embed.setImage(config.uiSuggestBanner);
-      if (config.uiBannerUrl) embed.setImage(config.uiBannerUrl);
+      
+      let imageUrl = config.uiSuggestImage || config.suggestionsImage || config.uiSuggestBanner || config.uiBannerUrl || null;
+      if (imageUrl) embed.setImage(imageUrl);
       if (generalImage) embed.setThumbnail(generalImage);
+      
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('suggest_modal').setLabel('📝 تقديم اقتراح').setStyle(ButtonStyle.Secondary)
       );
@@ -4640,6 +4672,66 @@ client.on('messageCreate', async (message) => {
       const embed = new EmbedBuilder()
         .setColor(0x2b2d31)
         .setDescription(`🏓 البينق: ${client.ws.ping}ms`);
+      if (generalImage) embed.setImage(generalImage);
+      await message.channel.send({ embeds: [embed] });
+      return;
+    }
+
+    // ===== أوامر التقييم (جديدة) =====
+    if (cmd === 'تقييم') {
+      const target = message.mentions.members.first();
+      if (!target) {
+        sentReply = await message.reply('⚠️ منشن العضو الذي تريد تقييمه.');
+        deleteAfter(sentReply);
+        return;
+      }
+      if (target.id === message.author.id) {
+        sentReply = await message.reply('❌ لا يمكنك تقييم نفسك.');
+        deleteAfter(sentReply);
+        return;
+      }
+
+      // التحقق من أن المستهدف يمتلك رتبة إشعارات
+      const noticeRoles = ['Game Notice', 'Event Notice', 'Ajr Notice'];
+      const hasNotice = target.roles.cache.some(r => noticeRoles.includes(r.name));
+      if (!hasNotice) {
+        sentReply = await message.reply('⚠️ هذا العضو ليس لديه رتبة إشعارات ليتم تقييمه.');
+        deleteAfter(sentReply);
+        return;
+      }
+
+      const newRating = await addRating(guildId, target.id, 1);
+      const embed = new EmbedBuilder()
+        .setTitle('⭐ تقييم')
+        .setColor(0x2b2d31)
+        .setDescription(`تم منح **${target.user.username}** نقطة تقييم.\nإجمالي التقييمات الآن: **${newRating}**`)
+        .setTimestamp();
+      if (generalImage) embed.setThumbnail(generalImage);
+      sentReply = await message.channel.send({ embeds: [embed] });
+      deleteAfter(sentReply);
+      return;
+    }
+
+    if (cmd === 'تقييمات' || cmd === 'الترتيب_التقييمي') {
+      const top = await getTopRatings(guildId, 10);
+      if (!top.length) {
+        sentReply = await message.reply('📭 لا توجد تقييمات حتى الآن.');
+        deleteAfter(sentReply);
+        return;
+      }
+      let desc = '';
+      let rank = 1;
+      for (const entry of top) {
+        const member = await message.guild.members.fetch(entry.userId).catch(() => null);
+        const name = member ? member.user.username : `مستخدم ${entry.userId}`;
+        desc += `#${rank} ${name} - ${entry.rating} نقطة\n`;
+        rank++;
+      }
+      const embed = new EmbedBuilder()
+        .setTitle('🏆 ترتيب التقييمات')
+        .setColor(0x2b2d31)
+        .setDescription(desc)
+        .setFooter({ text: 'أعلى 10 أعضاء' });
       if (generalImage) embed.setImage(generalImage);
       await message.channel.send({ embeds: [embed] });
       return;
