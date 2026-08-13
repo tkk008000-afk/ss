@@ -788,6 +788,7 @@ function getSettingsData() {
       description: 'إدارة الرتب التي تظهر في لوحة `رتب`.',
       options: [
         '`اضافة_رتبة [الاسم]` - إضافة رتبة جديدة للقائمة (للمتحكمين)',
+        '`حذف_رتبة [الاسم]` - حذف رتبة من القائمة (للمتحكمين)',
         '`صورة_رتب [رابط]` - تعيين صورة لوحة الرتب',
         '`عنوان_قائمة_الرتب [نص]` - تعيين نص القائمة المنسدلة'
       ]
@@ -3334,6 +3335,29 @@ client.on('messageCreate', async (message) => {
           await updateGuildConfig(guildId, { uiRolesOptions: roles });
           await message.reply(`✅ تم إضافة الرتبة "${value}" إلى القائمة.`);
         },
+        // ===== أمر حذف رتبة (جديد) =====
+        'حذف_رتبة': async () => {
+          if (!value) return message.reply('⚠️ أدخل اسم الرتبة التي تريد حذفها.');
+          let roles = config.uiRolesOptions || [];
+          const index = roles.indexOf(value);
+          if (index === -1) {
+            return message.reply(`⚠️ الرتبة "${value}" غير موجودة في القائمة.`);
+          }
+          roles.splice(index, 1);
+          await updateGuildConfig(guildId, { uiRolesOptions: roles });
+          await message.reply(`✅ تم حذف الرتبة "${value}" من القائمة المنسدلة.`);
+          
+          // حذف الدور الفعلي من السيرفر (اختياري)
+          const role = message.guild.roles.cache.find(r => r.name === value);
+          if (role) {
+            try {
+              await role.delete();
+              await message.reply(`🗑️ تم حذف الدور "${value}" من السيرفر أيضاً.`);
+            } catch (e) {
+              console.error('فشل حذف الدور:', e);
+            }
+          }
+        },
         'صورة_رتب': async () => {
           if (!value || !value.match(/^https?:\/\/.+/)) return message.reply('⚠️ رابط صورة غير صالح.');
           await updateGuildConfig(guildId, { uiRolesImage: value });
@@ -3921,6 +3945,37 @@ client.on('messageCreate', async (message) => {
         .setFooter({ text: `عدد الرتب: ${roles.length}` });
       if (config.uiBannerUrl) embed.setImage(config.uiBannerUrl);
       await message.channel.send({ embeds: [embed] });
+      return;
+    }
+
+    // ===== أمر حذف رتبة (نصي) =====
+    if (cmd === 'حذف_رتبة') {
+      if (!(await hasPermission(message.member, guildId))) {
+        return message.reply('❌ تحتاج صلاحية متحكم.');
+      }
+      const roleName = args.join(' ');
+      if (!roleName) {
+        return message.reply('⚠️ يرجى إدخال اسم الرتبة التي تريد حذفها.');
+      }
+      let roles = config.uiRolesOptions || [];
+      const index = roles.indexOf(roleName);
+      if (index === -1) {
+        return message.reply(`⚠️ الرتبة "${roleName}" غير موجودة في القائمة.`);
+      }
+      roles.splice(index, 1);
+      await updateGuildConfig(guildId, { uiRolesOptions: roles });
+      await message.reply(`✅ تم حذف الرتبة "${roleName}" من القائمة المنسدلة.`);
+      
+      // حذف الدور الفعلي من السيرفر (اختياري)
+      const role = message.guild.roles.cache.find(r => r.name === roleName);
+      if (role) {
+        try {
+          await role.delete();
+          await message.reply(`🗑️ تم حذف الدور "${roleName}" من السيرفر أيضاً.`);
+        } catch (e) {
+          console.error('فشل حذف الدور:', e);
+        }
+      }
       return;
     }
 
