@@ -1,5 +1,5 @@
 // ============================================================
-// البوت المتكامل - النسخة النهائية مع الثيم الداكن الموحد والقوائم المندمجة
+// البوت المتكامل - النسخة النهائية مع نظام العملات والموقع
 // ============================================================
 
 const {
@@ -12,11 +12,124 @@ const {
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
 const express = require('express');
 const mongoose = require('mongoose');
+const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 
 // ========== خادم الويب ==========
-app.get('/', (req, res) => res.send('✅ البوت يعمل'));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// API Routes للموقع
+app.get('/api/stats', async (req, res) => {
+  try {
+    const guildCount = client.guilds.cache.size;
+    const userCount = client.users.cache.size;
+    const totalMembers = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);
+    res.json({
+      status: 'online',
+      guilds: guildCount,
+      users: userCount,
+      members: totalMembers,
+      uptime: process.uptime(),
+      ping: client.ws.ping
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/top-credits/:guildId', async (req, res) => {
+  try {
+    const { guildId } = req.params;
+    const top = await User.find({ guildId }).sort({ credits: -1 }).limit(10);
+    const guild = client.guilds.cache.get(guildId);
+    const result = await Promise.all(top.map(async (u) => {
+      const member = guild ? await guild.members.fetch(u.userId).catch(() => null) : null;
+      return {
+        username: member ? member.user.username : 'Unknown',
+        credits: u.credits || 0
+      };
+    }));
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Bot Dashboard</title>
+      <style>
+        body { font-family: Arial, sans-serif; background: #2b2d31; color: #e0e0e0; padding: 20px; }
+        .container { max-width: 800px; margin: auto; text-align: center; }
+        .status { background: #1e1e22; padding: 20px; border-radius: 10px; margin: 10px 0; }
+        h1 { color: #5865f2; }
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 20px 0; }
+        .stat-card { background: #1e1e22; padding: 15px; border-radius: 8px; }
+        .stat-card h3 { margin: 0; color: #aaa; }
+        .stat-card p { font-size: 24px; margin: 5px 0; color: #fff; }
+        .green { color: #57f287; }
+        .blue { color: #5865f2; }
+        .orange { color: #faa81a; }
+        .purple { color: #9b59b6; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>🤖 Bot Dashboard</h1>
+        <div class="status">
+          <p>🟢 البوت يعمل بشكل طبيعي</p>
+        </div>
+        <div class="stats" id="stats">
+          <div class="stat-card"><h3>السيرفرات</h3><p id="guilds">...</p></div>
+          <div class="stat-card"><h3>الأعضاء</h3><p id="members">...</p></div>
+          <div class="stat-card"><h3>سرعة الاستجابة</h3><p id="ping">...</p></div>
+          <div class="stat-card"><h3>وقت التشغيل</h3><p id="uptime">...</p></div>
+        </div>
+        <div class="status">
+          <h3>🏆 أعلى 10 أعضاء في العملات</h3>
+          <div id="topCredits">جاري التحميل...</div>
+        </div>
+      </div>
+      <script>
+        async function fetchStats() {
+          try {
+            const res = await fetch('/api/stats');
+            const data = await res.json();
+            document.getElementById('guilds').textContent = data.guilds;
+            document.getElementById('members').textContent = data.members;
+            document.getElementById('ping').textContent = data.ping + 'ms';
+            const hours = Math.floor(data.uptime / 3600);
+            const minutes = Math.floor((data.uptime % 3600) / 60);
+            document.getElementById('uptime').textContent = hours + 'h ' + minutes + 'm';
+          } catch(e) { console.error(e); }
+        }
+        async function fetchTopCredits() {
+          try {
+            const guildId = window.location.pathname.split('/').pop() || '';
+            const res = await fetch('/api/top-credits/' + guildId);
+            const data = await res.json();
+            let html = '<ol>';
+            data.forEach((u, i) => {
+              html += '<li>' + u.username + ' - ' + u.credits + ' 🪙</li>';
+            });
+            html += '</ol>';
+            document.getElementById('topCredits').innerHTML = html || 'لا توجد بيانات';
+          } catch(e) { console.error(e); }
+        }
+        fetchStats();
+        fetchTopCredits();
+        setInterval(fetchStats, 30000);
+      </script>
+    </body>
+    </html>
+  `);
+});
+
 app.listen(port, () => console.log(`🌐 خادم الويب على المنفذ ${port}`));
 
 // ========== متغيرات البيئة ==========
@@ -94,6 +207,7 @@ const ConfigSchema = new mongoose.Schema({
 }, { timestamps: true });
 const Config = mongoose.model('Config', ConfigSchema);
 
+// تعديل نموذج المستخدم لإضافة العملات
 const UserSchema = new mongoose.Schema({
   guildId: String,
   userId: String,
@@ -101,6 +215,8 @@ const UserSchema = new mongoose.Schema({
   level: { type: Number, default: 0 },
   messages: { type: Number, default: 0 },
   adminPoints: { type: Number, default: 0 },
+  credits: { type: Number, default: 0 }, // نظام العملات الجديد
+  lastDaily: { type: Date, default: null }, // آخر مرة أخذ فيها المكافأة اليومية
   assignedTasks: [{ taskId: mongoose.Schema.Types.ObjectId, status: { type: String, enum: ['pending', 'accepted', 'completed'], default: 'pending' } }],
   leave: { isOnLeave: { type: Boolean, default: false }, leaveEnd: Date, savedRoles: [String] },
   purchasedRoles: [String],
@@ -151,7 +267,7 @@ const LeaveLog = mongoose.model('LeaveLog', LeaveLogSchema);
 const StoreItemSchema = new mongoose.Schema({
   guildId: String,
   roleId: String,
-  price: Number,
+  price: Number, // السعر الآن بالعملات (Credits)
   description: String,
 });
 const StoreItem = mongoose.model('StoreItem', StoreItemSchema);
@@ -299,6 +415,31 @@ async function getUser(guildId, userId) {
     await user.save();
   }
   return user;
+}
+
+// دوال العملات الجديدة
+async function addCredits(guildId, userId, amount) {
+  const user = await getUser(guildId, userId);
+  user.credits = (user.credits || 0) + amount;
+  await user.save();
+  return user.credits;
+}
+
+async function removeCredits(guildId, userId, amount) {
+  const user = await getUser(guildId, userId);
+  if ((user.credits || 0) < amount) return false;
+  user.credits = (user.credits || 0) - amount;
+  await user.save();
+  return true;
+}
+
+async function getCredits(guildId, userId) {
+  const user = await getUser(guildId, userId);
+  return user.credits || 0;
+}
+
+async function getTopCredits(guildId, limit = 10) {
+  return await User.find({ guildId }).sort({ credits: -1 }).limit(limit);
 }
 
 async function isController(userId, guildId) {
@@ -653,6 +794,9 @@ function getHelpData() {
         { name: 'خريطة', value: 'عرض خريطة السيرفر (القنوات والأقسام)', inline: true },
         { name: 'تقييم', value: 'منح نقطة تقييم لعضو لديه رتبة إشعارات', inline: true },
         { name: 'تقييمات', value: 'عرض ترتيب التقييمات', inline: true },
+        { name: 'رصيد', value: 'عرض رصيد العملات الخاص بك', inline: true },
+        { name: 'تحويل', value: 'تحويل عملات إلى عضو آخر', inline: true },
+        { name: 'يومي', value: 'الحصول على مكافأة يومية', inline: true },
       ]
     },
     'admin': {
@@ -660,7 +804,7 @@ function getHelpData() {
       description: 'أوامر للمتحكمين فقط.',
       fields: [
         { name: 'متحكم / الغاء_متحكم', value: 'إدارة صلاحيات التحكم (للمالك)', inline: false },
-        { name: 'قائمة_المتحكمين', value: 'عرض قائمة المتحكمين', inline: false },
+        { name: 'قائمة_المتحكمين', value: 'عرض قائمة المتحكمين (بما فيهم رتبة التحكم)', inline: false },
         { name: 'لوحة_المهام', value: 'فتح لوحة المهام الإدارية', inline: false },
         { name: 'حظر / طرد / كتم / فك_كتم', value: 'إدارة الأعضاء', inline: false },
         { name: 'تحذير / ابطال_تحذيرات', value: 'نظام التحذيرات', inline: false },
@@ -671,6 +815,7 @@ function getHelpData() {
         { name: 'اعطاء_رتبة / سحب_رتبة', value: 'إدارة الرتب', inline: false },
         { name: 'اعلان / قول / ايمبد', value: 'أدوات النشر', inline: false },
         { name: 'عرض_رتب', value: 'عرض رتب عضو', inline: false },
+        { name: 'اعطاء_عملات / سحب_عملات', value: 'إدارة عملات الأعضاء (للمالك)', inline: false },
       ]
     },
     'levels': {
@@ -704,9 +849,9 @@ function getHelpData() {
     },
     'store': {
       title: '🛒 المتجر',
-      description: 'شراء وبيع الرتب.',
+      description: 'شراء وبيع الرتب بالعملات.',
       fields: [
-        { name: 'متجر', value: 'فتح المتجر لشراء الرتب', inline: false },
+        { name: 'متجر', value: 'فتح المتجر لشراء الرتب (بالعملات)', inline: false },
         { name: 'بانل_اضافة_منتج', value: 'إضافة منتج جديد (للمتحكمين)', inline: false },
         { name: 'تعيين اضافة_منتج / حذف_منتج', value: 'إدارة المنتجات (للمالك)', inline: false },
       ]
@@ -763,7 +908,7 @@ function getSettingsData() {
     },
     'autoline': {
       title: '🤖 إعدادات الأوتو لاين',
-      description: 'رسائل أو صور تظهر تلقائياً في قناة.',
+      description: 'رسائل أو صور تظهر تلقائياً في قناة (فقط من الأعضاء العاديين).',
       options: [
         '`اوتر_لاين #روم [نص]` - تعيين نص أوتو لاين',
         '`صورة_اوترلاين #روم رابط` - تعيين صورة أوتو لاين (تُرسل الصورة فقط بدون Embed)',
@@ -841,7 +986,7 @@ function getSettingsData() {
       title: '🛒 إعدادات المتجر',
       description: 'إدارة منتجات المتجر وصورته.',
       options: [
-        '`اضافة_منتج @رتبة [السعر] [الوصف]` - إضافة منتج',
+        '`اضافة_منتج @رتبة [السعر] [الوصف]` - إضافة منتج (بالعملات)',
         '`حذف_منتج [معرف]` - حذف منتج',
         '`صورة_المتجر [رابط]` - تعيين صورة المتجر',
         '`عنوان_متجر_بانل [نص]` - عنوان لوحة المتجر',
@@ -973,7 +1118,7 @@ async function sendRolesPanel(channel, config, guildId) {
     .setFooter({ text: 'اضغط مرة للحصول على الرتبة، ومرة أخرى لإزالتها.' })
     .setTimestamp();
 
-  // تعيين الصورة بالأولوية: uiRolesImage ← uiBannerUrl ← الصورة الافتراضية
+  // الصورة الافتراضية المطلوبة
   let imageUrl = config.uiRolesImage || config.uiBannerUrl || 'https://i.imgur.com/7dXe7tM.png';
   embed.setImage(imageUrl);
 
@@ -1109,6 +1254,9 @@ client.once('clientReady', async () => {
       new SlashCommandBuilder().setName('رتب').setDescription('فتح لوحة الرتب (قائمة منسدلة)'),
       new SlashCommandBuilder().setName('اضافة_رتبة').setDescription('إضافة رتبة جديدة إلى القائمة (للمتحكمين)').addStringOption(opt => opt.setName('الاسم').setDescription('اسم الرتبة الجديدة').setRequired(true)),
       new SlashCommandBuilder().setName('خريطة').setDescription('عرض خريطة السيرفر (القنوات والأقسام)'),
+      new SlashCommandBuilder().setName('رصيد').setDescription('عرض رصيد العملات').addUserOption(opt => opt.setName('عضو').setDescription('اختر عضواً (اختياري)').setRequired(false)),
+      new SlashCommandBuilder().setName('يومي').setDescription('الحصول على مكافأة يومية'),
+      new SlashCommandBuilder().setName('تحويل').setDescription('تحويل عملات إلى عضو آخر').addUserOption(opt => opt.setName('عضو').setDescription('العضو المراد التحويل إليه').setRequired(true)).addNumberOption(opt => opt.setName('المبلغ').setDescription('المبلغ المراد تحويله').setRequired(true)),
     ].map(cmd => cmd.toJSON());
 
     const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -1286,7 +1434,7 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
 });
 
 // ============================================================
-// ========== نظام المستويات والأوتو لاين ==========
+// ========== نظام المستويات والأوتو لاين والعملات ==========
 // ============================================================
 
 client.on('messageCreate', async (message) => {
@@ -1300,6 +1448,8 @@ client.on('messageCreate', async (message) => {
   try {
     const user = await getUser(guildId, userId);
     user.messages += 1;
+    
+    // نظام المستويات
     const gain = Math.floor(Math.random() * 15) + 5;
     user.xp += gain;
 
@@ -1332,28 +1482,35 @@ client.on('messageCreate', async (message) => {
           if (member) await member.roles.add(role).catch(() => {});
         }
       }
-    } else {
-      await user.save();
     }
+
+    // نظام العملات - ربح عملات عند إرسال الرسائل (مكافأة عشوائية)
+    const creditGain = Math.floor(Math.random() * 5) + 1; // من 1 إلى 5 عملات
+    user.credits = (user.credits || 0) + creditGain;
+    await user.save();
+
   } catch (err) {
-    console.error('[XP ERROR]', err);
+    console.error('[XP/CREDIT ERROR]', err);
   }
 
-  // ===== الأوتو لاين =====
-  const auto = await AutoLine.findOne({ guildId, channelId: message.channel.id });
-  if (auto && auto.enabled) {
-    const channel = client.channels.cache.get(message.channel.id);
-    if (channel) {
-      try {
-        if (auto.image && auto.text) {
-          await channel.send(`${auto.text}\n${auto.image}`);
-        } else if (auto.image) {
-          await channel.send(auto.image);
-        } else if (auto.text) {
-          await channel.send(auto.text);
-        }
-      } catch (e) { console.error('[AUTOLINE ERROR]', e); }
-      return;
+  // ===== الأوتو لاين (فقط للأعضاء العاديين، وليس البوت) =====
+  // تم التعديل: الشرط message.author.bot يمنع البوت من تشغيل الأوتو لاين
+  if (!message.author.bot) {
+    const auto = await AutoLine.findOne({ guildId, channelId: message.channel.id });
+    if (auto && auto.enabled) {
+      const channel = client.channels.cache.get(message.channel.id);
+      if (channel) {
+        try {
+          if (auto.image && auto.text) {
+            await channel.send(`${auto.text}\n${auto.image}`);
+          } else if (auto.image) {
+            await channel.send(auto.image);
+          } else if (auto.text) {
+            await channel.send(auto.text);
+          }
+        } catch (e) { console.error('[AUTOLINE ERROR]', e); }
+        return;
+      }
     }
   }
 
@@ -1433,8 +1590,80 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ===== أمر رصيد (العملات) =====
+    if (commandName === 'رصيد') {
+      const member = interaction.options.getMember('عضو') || interaction.member;
+      const credits = await getCredits(guildId, member.id);
+      const embed = new EmbedBuilder()
+        .setTitle(`💰 رصيد ${member.user.username}`)
+        .setColor(0x2b2d31)
+        .setDescription(`**${credits}** 🪙`)
+        .setTimestamp();
+      if (getGeneralImage(interaction.guild, config)) embed.setImage(getGeneralImage(interaction.guild, config));
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // ===== أمر يومي (مكافأة يومية) =====
+    if (commandName === 'يومي') {
+      const user = await getUser(guildId, interaction.user.id);
+      const now = new Date();
+      const dailyAmount = 100; // المكافأة اليومية
+      
+      if (user.lastDaily) {
+        const lastDaily = new Date(user.lastDaily);
+        const hoursDiff = (now - lastDaily) / (1000 * 60 * 60);
+        if (hoursDiff < 24) {
+          const remaining = Math.ceil(24 - hoursDiff);
+          return interaction.reply({ content: `⏳ يمكنك الحصول على مكافأتك اليومية بعد ${remaining} ساعة.`, flags: MessageFlags.Ephemeral });
+        }
+      }
+      
+      user.credits = (user.credits || 0) + dailyAmount;
+      user.lastDaily = now;
+      await user.save();
+      
+      const embed = new EmbedBuilder()
+        .setTitle('🎁 مكافأة يومية!')
+        .setColor(0x2b2d31)
+        .setDescription(`حصلت على **${dailyAmount}** 🪙\nرصيدك الحالي: **${user.credits}** 🪙`)
+        .setTimestamp();
+      if (getGeneralImage(interaction.guild, config)) embed.setImage(getGeneralImage(interaction.guild, config));
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // ===== أمر تحويل (العملات) =====
+    if (commandName === 'تحويل') {
+      const target = interaction.options.getMember('عضو');
+      const amount = interaction.options.getNumber('المبلغ');
+      
+      if (!target) return interaction.reply({ content: '⚠️ العضو غير موجود.', flags: MessageFlags.Ephemeral });
+      if (target.id === interaction.user.id) return interaction.reply({ content: '❌ لا يمكنك التحويل لنفسك.', flags: MessageFlags.Ephemeral });
+      if (amount < 1) return interaction.reply({ content: '⚠️ أدخل مبلغاً موجباً.', flags: MessageFlags.Ephemeral });
+      
+      const senderCredits = await getCredits(guildId, interaction.user.id);
+      if (senderCredits < amount) {
+        return interaction.reply({ content: `❌ ليس لديك رصيد كافٍ. رصيدك: **${senderCredits}** 🪙`, flags: MessageFlags.Ephemeral });
+      }
+      
+      await removeCredits(guildId, interaction.user.id, amount);
+      await addCredits(guildId, target.id, amount);
+      
+      const embed = new EmbedBuilder()
+        .setTitle('💰 عملية تحويل ناجحة')
+        .setColor(0x2b2d31)
+        .setDescription(`تم تحويل **${amount}** 🪙 إلى ${target}`)
+        .setFooter({ text: `تم بواسطة ${interaction.user.tag}` })
+        .setTimestamp();
+      if (getGeneralImage(interaction.guild, config)) embed.setImage(getGeneralImage(interaction.guild, config));
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return;
+    }
+
     if (commandName === 'معلومات') {
       const member = interaction.options.getMember('عضو') || interaction.member;
+      const credits = await getCredits(guildId, member.id);
       const embed = new EmbedBuilder()
         .setTitle(`ℹ️ معلومات ${member.user.username}`)
         .setColor(0x2b2d31)
@@ -1444,7 +1673,8 @@ client.on('interactionCreate', async (interaction) => {
           { name: '📅 تاريخ الانضمام', value: member.joinedAt.toDateString(), inline: true },
           { name: '📅 تاريخ الحساب', value: member.user.createdAt.toDateString(), inline: true },
           { name: '🎭 أعلى رتبة', value: member.roles.highest.toString(), inline: true },
-          { name: '🔊 في روم صوتي', value: member.voice.channel ? member.voice.channel.name : 'لا', inline: true }
+          { name: '🔊 في روم صوتي', value: member.voice.channel ? member.voice.channel.name : 'لا', inline: true },
+          { name: '💰 العملات', value: `${credits} 🪙`, inline: true }
         );
       const generalImage = getGeneralImage(interaction.guild, config);
       if (generalImage) embed.setImage(generalImage);
@@ -1478,11 +1708,35 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ===== أمر قائمة_المتحكمين المعدل =====
     if (commandName === 'قائمة_المتحكمين') {
       const controllers = await getControllers(guildId);
-      if (!controllers.length) return interaction.reply({ content: '📋 لا يوجد متحكمون.', flags: MessageFlags.Ephemeral });
-      const list = controllers.map(id => `<@${id}>`).join('\n');
-      const embed = new EmbedBuilder().setTitle('🛡️ قائمة المتحكمين').setColor(0x2b2d31).setDescription(list);
+      const config = await getGuildConfig(guildId);
+      let allControllers = [...controllers];
+      
+      // إضافة الأعضاء الذين لديهم رتبة التحكم بالبوت
+      if (config.botControllerRole) {
+        const role = interaction.guild.roles.cache.get(config.botControllerRole);
+        if (role) {
+          const membersWithRole = role.members.map(m => m.id);
+          for (const id of membersWithRole) {
+            if (!allControllers.includes(id)) {
+              allControllers.push(id);
+            }
+          }
+        }
+      }
+      
+      if (!allControllers.length) {
+        return interaction.reply({ content: '📋 لا يوجد متحكمون.', flags: MessageFlags.Ephemeral });
+      }
+      
+      const list = allControllers.map(id => `<@${id}>`).join('\n');
+      const embed = new EmbedBuilder()
+        .setTitle('🛡️ قائمة المتحكمين')
+        .setColor(0x2b2d31)
+        .setDescription(list)
+        .setFooter({ text: `عدد المتحكمين: ${allControllers.length}` });
       await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
       return;
     }
@@ -1623,7 +1877,7 @@ client.on('interactionCreate', async (interaction) => {
         return {
           label: role ? role.name : 'رتبة غير موجودة',
           value: item._id.toString(),
-          description: `${item.price} PT`,
+          description: `${item.price} 🪙`,
           emoji: '🛒',
         };
       });
@@ -1720,9 +1974,11 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    // ===== أمر لوحة_المهام المعدل =====
     if (commandName === 'لوحة_المهام') {
+      // التحقق من صلاحية المتحكم أو رتبة التحكم بالبوت
       if (!(await hasPermission(interaction.member, guildId))) {
-        return interaction.reply({ content: '❌ هذا الأمر للمتحكمين فقط.', flags: MessageFlags.Ephemeral });
+        return interaction.reply({ content: '❌ هذا الأمر للمتحكمين أو لرتبة التحكم بالبوت فقط.', flags: MessageFlags.Ephemeral });
       }
       const embed = new EmbedBuilder()
         .setTitle('📋 لوحة المهام الإدارية')
@@ -2061,32 +2317,32 @@ client.on('interactionCreate', async (interaction) => {
       if (!role) {
         return interaction.reply({ content: '❌ الرتبة غير موجودة حالياً.', flags: MessageFlags.Ephemeral });
       }
-      const existing = await PendingPurchase.findOne({ guildId, userId: interaction.user.id, status: 'pending' });
-      if (existing) {
-        return interaction.reply({ content: '⚠️ لديك طلب شراء معلق بالفعل. انتظر حتى تتم معالجته.', flags: MessageFlags.Ephemeral });
+      
+      // التحقق من الرصيد
+      const userCredits = await getCredits(guildId, interaction.user.id);
+      if (userCredits < item.price) {
+        return interaction.reply({ content: `❌ ليس لديك رصيد كافٍ. تحتاج **${item.price}** 🪙، رصيدك: **${userCredits}** 🪙`, flags: MessageFlags.Ephemeral });
       }
-      const purchase = await createPendingPurchase(guildId, interaction.user.id, item.roleId, role.name, item.price);
-      const storeChannel = config.storeChannel ? interaction.guild.channels.cache.get(config.storeChannel) : null;
-      if (!storeChannel) {
-        return interaction.reply({ content: '⚠️ لم يتم تعيين قناة المتجر بعد.', flags: MessageFlags.Ephemeral });
-      }
+      
+      // خصم العملات مباشرةً
+      await removeCredits(guildId, interaction.user.id, item.price);
+      
+      // إعطاء الرتبة
+      await interaction.member.roles.add(role);
+      
       const embed = new EmbedBuilder()
-        .setTitle('🛒 طلب شراء جديد')
+        .setTitle('✅ تم شراء الرتبة بنجاح!')
         .setColor(0x2b2d31)
-        .setDescription(`**المشتري:** ${interaction.user} (${interaction.user.id})\n**الرتبة:** ${role.name}\n**السعر:** ${item.price}\n**الوصف:** ${item.description || 'لا يوجد'}`)
+        .setDescription(`تم شراء رتبة **${role.name}** مقابل **${item.price}** 🪙\nرصيدك المتبقي: **${userCredits - item.price}** 🪙`)
         .setTimestamp();
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`store_approve_${purchase._id}`)
-          .setLabel('✅ تأكيد الشراء')
-          .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setCustomId(`store_reject_${purchase._id}`)
-          .setLabel('❌ رفض')
-          .setStyle(ButtonStyle.Secondary)
-      );
-      await storeChannel.send({ content: `<@&${config.sellerRole || ''}>`, embeds: [embed], components: [row] });
-      await interaction.reply({ content: `✅ تم إرسال طلب شراء **${role.name}** إلى البائعين.`, flags: MessageFlags.Ephemeral });
+      if (config.uiStoreImage) embed.setImage(config.uiStoreImage);
+      
+      await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      await logToChannel(guildId, {
+        title: '🛒 شراء رتبة',
+        color: 0x2b2d31,
+        description: `**المشتري:** ${interaction.user}\n**الرتبة:** ${role.name}\n**السعر:** ${item.price} 🪙`
+      });
       return;
     }
 
@@ -2551,7 +2807,7 @@ client.on('interactionCreate', async (interaction) => {
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('product_price')
-              .setLabel('السعر')
+              .setLabel('السعر (بالعملات)')
               .setStyle(TextInputStyle.Short)
               .setRequired(true)
               .setPlaceholder('مثال: 50')
@@ -2569,63 +2825,8 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    if (interaction.customId.startsWith('store_')) {
-      const parts = interaction.customId.split('_');
-      const action = parts[1];
-      const purchaseId = parts[2];
-      const purchase = await PendingPurchase.findById(purchaseId);
-      if (!purchase) {
-        return interaction.reply({ content: '❌ الطلب غير موجود.', flags: MessageFlags.Ephemeral });
-      }
-      if (purchase.status !== 'pending') {
-        return interaction.reply({ content: '⚠️ تمت معالجة هذا الطلب مسبقاً.', flags: MessageFlags.Ephemeral });
-      }
-      const isSeller = config.sellerRole && interaction.member.roles.cache.has(config.sellerRole);
-      const isAdmin = await hasPermission(interaction.member, guildId);
-      if (!isSeller && !isAdmin) {
-        return interaction.reply({ content: '❌ ليس لديك صلاحية البائع أو الإدارة.', flags: MessageFlags.Ephemeral });
-      }
-      if (action === 'approve') {
-        const member = await interaction.guild.members.fetch(purchase.userId).catch(() => null);
-        if (!member) {
-          return interaction.reply({ content: '❌ المستخدم غير موجود في السيرفر.', flags: MessageFlags.Ephemeral });
-        }
-        const role = interaction.guild.roles.cache.get(purchase.roleId);
-        if (!role) {
-          return interaction.reply({ content: '❌ الرتبة غير موجودة.', flags: MessageFlags.Ephemeral });
-        }
-        await member.roles.add(role);
-        purchase.status = 'completed';
-        await purchase.save();
-        const embed = new EmbedBuilder()
-          .setTitle('✅ تم تأكيد الشراء')
-          .setColor(0x2b2d31)
-          .setDescription(`تم منح **${role.name}** لـ ${member}.\nالموافق: ${interaction.user}`)
-          .setTimestamp();
-        await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
-        try {
-          const dmEmbed = new EmbedBuilder()
-            .setTitle('🎉 تم شراء الرتبة بنجاح!')
-            .setDescription(`تم منحك رتبة **${role.name}** في **${interaction.guild.name}**.`)
-            .setColor(0x2b2d31);
-          await member.send({ embeds: [dmEmbed] });
-        } catch (e) {}
-        await logToChannel(guildId, {
-          title: '🛒 شراء رتبة',
-          color: 0x2b2d31,
-          description: `**المشتري:** ${member.user.tag}\n**الرتبة:** ${role.name}\n**الموافق:** ${interaction.user.tag}`
-        });
-      } else if (action === 'reject') {
-        purchase.status = 'cancelled';
-        await purchase.save();
-        await interaction.reply({ content: `❌ تم رفض طلب شراء <@${purchase.userId}>.`, flags: MessageFlags.Ephemeral });
-        try {
-          const userMember = await interaction.guild.members.fetch(purchase.userId);
-          await userMember.send(`❌ تم رفض طلب شراء الرتبة **${purchase.roleName}**.`);
-        } catch (e) {}
-      }
-      return;
-    }
+    // ===== أزرار المتجر تم إلغاؤها لأن الشراء يتم مباشرة من القائمة =====
+    // تم حذف معالج store_approve و store_reject لأن الشراء أصبح فورياً
 
     if (interaction.customId === 'suggest_modal') {
       if (!config.suggestionsChannel) {
@@ -2997,11 +3198,11 @@ client.on('interactionCreate', async (interaction) => {
       const role = interaction.guild.roles.cache.get(roleId);
       if (!role) return interaction.reply({ content: '❌ الرتبة غير موجودة.', flags: MessageFlags.Ephemeral });
       await addStoreItem(guildId, roleId, price, desc);
-      await interaction.reply({ content: `✅ تم إضافة المنتج **${role.name}** بسعر **${price}** بنجاح.`, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `✅ تم إضافة المنتج **${role.name}** بسعر **${price}** 🪙 بنجاح.`, flags: MessageFlags.Ephemeral });
       await logToChannel(guildId, {
         title: '🛒 إضافة منتج',
         color: 0x2b2d31,
-        description: `**المنفذ:** ${interaction.user}\n**الرتبة:** ${role.name} (${roleId})\n**السعر:** ${price}\n**الوصف:** ${desc}`
+        description: `**المنفذ:** ${interaction.user}\n**الرتبة:** ${role.name} (${roleId})\n**السعر:** ${price} 🪙\n**الوصف:** ${desc}`
       });
       return;
     }
@@ -3483,7 +3684,7 @@ client.on('messageCreate', async (message) => {
           if (isNaN(price) || price < 1) return message.reply('⚠️ السعر غير صحيح.');
           const desc = parts.slice(1).join(' ') || 'لا يوجد وصف';
           await addStoreItem(guildId, role.id, price, desc);
-          await message.reply(`✅ تم إضافة المنتج **${role.name}** بسعر **${price}**.`);
+          await message.reply(`✅ تم إضافة المنتج **${role.name}** بسعر **${price}** 🪙.`);
         },
         'حذف_منتج': async () => {
           if (!value) return message.reply('⚠️ أدخل معرف المنتج.');
@@ -3684,8 +3885,9 @@ client.on('messageCreate', async (message) => {
 
     // ===== لوحة_المهام =====
     if (cmd === 'لوحة_المهام') {
+      // التحقق من صلاحية المتحكم أو رتبة التحكم بالبوت
       if (!(await hasPermission(message.member, guildId))) {
-        return message.reply('❌ هذا الأمر للمتحكمين فقط.');
+        return message.reply('❌ هذا الأمر للمتحكمين أو لرتبة التحكم بالبوت فقط.');
       }
       const embed = new EmbedBuilder()
         .setTitle('📋 لوحة المهام الإدارية')
@@ -3808,7 +4010,7 @@ client.on('messageCreate', async (message) => {
       }
       const embed = new EmbedBuilder()
         .setTitle(config.uiStoreTitle || '🛒 متجر الرتب')
-        .setDescription(config.uiStoreDescription || 'اختر الرتبة التي تريد شراءها.\nسيتم إرسال طلبك إلى البائعين للموافقة.')
+        .setDescription(config.uiStoreDescription || 'اختر الرتبة التي تريد شراءها.\nسيتم خصم العملات فوراً وسيتم منحك الرتبة.')
         .setColor(0x2b2d31);
       if (config.uiStoreImage) embed.setImage(config.uiStoreImage);
       if (config.storePanelImage) embed.setImage(config.storePanelImage);
@@ -3818,7 +4020,7 @@ client.on('messageCreate', async (message) => {
         return {
           label: role ? role.name : 'رتبة غير موجودة',
           value: item._id.toString(),
-          description: `${item.price}`,
+          description: `${item.price} 🪙`,
           emoji: '🛒',
         };
       });
@@ -3836,6 +4038,102 @@ client.on('messageCreate', async (message) => {
         );
       }
       await message.channel.send({ embeds: [embed], components: rows });
+      return;
+    }
+
+    // ===== رصيد =====
+    if (cmd === 'رصيد') {
+      const member = message.mentions.members.first() || message.member;
+      const credits = await getCredits(guildId, member.id);
+      const embed = new EmbedBuilder()
+        .setTitle(`💰 رصيد ${member.user.username}`)
+        .setColor(0x2b2d31)
+        .setDescription(`**${credits}** 🪙`)
+        .setTimestamp();
+      if (generalImage) embed.setImage(generalImage);
+      await message.channel.send({ embeds: [embed] });
+      return;
+    }
+
+    // ===== يومي =====
+    if (cmd === 'يومي') {
+      const user = await getUser(guildId, message.author.id);
+      const now = new Date();
+      const dailyAmount = 100;
+      
+      if (user.lastDaily) {
+        const lastDaily = new Date(user.lastDaily);
+        const hoursDiff = (now - lastDaily) / (1000 * 60 * 60);
+        if (hoursDiff < 24) {
+          const remaining = Math.ceil(24 - hoursDiff);
+          return message.reply(`⏳ يمكنك الحصول على مكافأتك اليومية بعد ${remaining} ساعة.`);
+        }
+      }
+      
+      user.credits = (user.credits || 0) + dailyAmount;
+      user.lastDaily = now;
+      await user.save();
+      
+      const embed = new EmbedBuilder()
+        .setTitle('🎁 مكافأة يومية!')
+        .setColor(0x2b2d31)
+        .setDescription(`حصلت على **${dailyAmount}** 🪙\nرصيدك الحالي: **${user.credits}** 🪙`)
+        .setTimestamp();
+      if (generalImage) embed.setImage(generalImage);
+      await message.channel.send({ embeds: [embed] });
+      return;
+    }
+
+    // ===== تحويل =====
+    if (cmd === 'تحويل') {
+      const target = message.mentions.members.first();
+      const amount = parseInt(args[1]);
+      
+      if (!target) return message.reply('⚠️ منشن العضو المراد التحويل إليه.');
+      if (target.id === message.author.id) return message.reply('❌ لا يمكنك التحويل لنفسك.');
+      if (isNaN(amount) || amount < 1) return message.reply('⚠️ أدخل مبلغاً موجباً.');
+      
+      const senderCredits = await getCredits(guildId, message.author.id);
+      if (senderCredits < amount) {
+        return message.reply(`❌ ليس لديك رصيد كافٍ. رصيدك: **${senderCredits}** 🪙`);
+      }
+      
+      await removeCredits(guildId, message.author.id, amount);
+      await addCredits(guildId, target.id, amount);
+      
+      const embed = new EmbedBuilder()
+        .setTitle('💰 عملية تحويل ناجحة')
+        .setColor(0x2b2d31)
+        .setDescription(`تم تحويل **${amount}** 🪙 إلى ${target}`)
+        .setFooter({ text: `تم بواسطة ${message.author.tag}` })
+        .setTimestamp();
+      if (generalImage) embed.setImage(generalImage);
+      await message.channel.send({ embeds: [embed] });
+      return;
+    }
+
+    // ===== اعطاء_عملات (للمالك) =====
+    if (cmd === 'اعطاء_عملات') {
+      if (message.author.id !== OWNER_ID) return message.reply('❌ هذا الأمر للمالك فقط.');
+      const target = message.mentions.members.first();
+      const amount = parseInt(args[1]);
+      if (!target) return message.reply('⚠️ منشن العضو.');
+      if (isNaN(amount) || amount < 1) return message.reply('⚠️ أدخل مبلغاً موجباً.');
+      await addCredits(guildId, target.id, amount);
+      await message.reply(`✅ تم إعطاء ${amount} 🪙 إلى ${target}`);
+      return;
+    }
+
+    // ===== سحب_عملات (للمالك) =====
+    if (cmd === 'سحب_عملات') {
+      if (message.author.id !== OWNER_ID) return message.reply('❌ هذا الأمر للمالك فقط.');
+      const target = message.mentions.members.first();
+      const amount = parseInt(args[1]);
+      if (!target) return message.reply('⚠️ منشن العضو.');
+      if (isNaN(amount) || amount < 1) return message.reply('⚠️ أدخل مبلغاً موجباً.');
+      const success = await removeCredits(guildId, target.id, amount);
+      if (!success) return message.reply(`❌ ${target} ليس لديه رصيد كافٍ.`);
+      await message.reply(`✅ تم سحب ${amount} 🪙 من ${target}`);
       return;
     }
 
@@ -4034,9 +4332,31 @@ client.on('messageCreate', async (message) => {
     // ===== قائمة_المتحكمين =====
     if (cmd === 'قائمة_المتحكمين') {
       const controllers = await getControllers(guildId);
-      if (!controllers.length) return message.reply('📋 لا يوجد متحكمون.');
-      const list = controllers.map(id => `<@${id}>`).join('\n');
-      const embed = new EmbedBuilder().setTitle('🛡️ قائمة المتحكمين').setColor(0x2b2d31).setDescription(list);
+      const config = await getGuildConfig(guildId);
+      let allControllers = [...controllers];
+      
+      if (config.botControllerRole) {
+        const role = message.guild.roles.cache.get(config.botControllerRole);
+        if (role) {
+          const membersWithRole = role.members.map(m => m.id);
+          for (const id of membersWithRole) {
+            if (!allControllers.includes(id)) {
+              allControllers.push(id);
+            }
+          }
+        }
+      }
+      
+      if (!allControllers.length) {
+        return message.reply('📋 لا يوجد متحكمون.');
+      }
+      
+      const list = allControllers.map(id => `<@${id}>`).join('\n');
+      const embed = new EmbedBuilder()
+        .setTitle('🛡️ قائمة المتحكمين')
+        .setColor(0x2b2d31)
+        .setDescription(list)
+        .setFooter({ text: `عدد المتحكمين: ${allControllers.length}` });
       await message.channel.send({ embeds: [embed] });
       return;
     }
@@ -4743,6 +5063,7 @@ client.on('messageCreate', async (message) => {
     // ===== معلومات =====
     if (cmd === 'معلومات') {
       const member = message.mentions.members.first() || message.member;
+      const credits = await getCredits(guildId, member.id);
       const embed = new EmbedBuilder()
         .setTitle(`ℹ️ معلومات ${member.user.username}`)
         .setColor(0x2b2d31)
@@ -4752,7 +5073,8 @@ client.on('messageCreate', async (message) => {
           { name: '📅 تاريخ الانضمام', value: member.joinedAt.toDateString(), inline: true },
           { name: '📅 تاريخ الحساب', value: member.user.createdAt.toDateString(), inline: true },
           { name: '🎭 أعلى رتبة', value: member.roles.highest.toString(), inline: true },
-          { name: '🔊 في روم صوتي', value: member.voice.channel ? member.voice.channel.name : 'لا', inline: true }
+          { name: '🔊 في روم صوتي', value: member.voice.channel ? member.voice.channel.name : 'لا', inline: true },
+          { name: '💰 العملات', value: `${credits} 🪙`, inline: true }
         );
       if (generalImage) embed.setImage(generalImage);
       await message.channel.send({ embeds: [embed] });
